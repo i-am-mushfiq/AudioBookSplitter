@@ -12,6 +12,10 @@ const projectRoot = path.resolve(process.cwd(), "..");
 const python = process.env.AUDIOBOOK_PYTHON || "C:\\Users\\Mushfiq\\miniconda3\\envs\\animal-farm-splitter\\python.exe";
 const script = path.join(projectRoot, "pdf_audiobook_splitter.py");
 
+function safeFileName(value) {
+  return (value || "Book").replace(/\.[^.]+$/, "").replace(/[^a-z0-9_-]+/gi, "_").replace(/^_+|_+$/g, "") || "Book";
+}
+
 async function zipOutput(directory) {
   const files = {};
   for (const name of await readdir(directory)) {
@@ -28,7 +32,8 @@ function collectUpload(request, root) {
     const parser = Busboy({ headers: request.headers, limits: { fileSize: 2 * 1024 * 1024 * 1024 } });
     parser.on("field", (name, value) => { fields[name] = value; });
     parser.on("file", (name, stream, info) => {
-      const destination = path.join(root, name === "pdf" ? "book.pdf" : "book.mp3");
+      const extension = path.extname(info.filename || "").toLowerCase() || (name === "pdf" ? ".pdf" : ".mp3");
+      const destination = path.join(root, name === "pdf" ? `book${extension}` : `book${extension}`);
       files[name] = destination;
       const chunks = [];
       stream.on("data", (chunk) => chunks.push(chunk));
@@ -68,10 +73,12 @@ const server = http.createServer(async (request, response) => {
     const { fields, files } = await collectUpload(request, input);
     if (!files.pdf || !files.audio) throw new Error("Both a PDF and an audiobook are required.");
     const template = fields.template || "[{I2}|{T}]_{B}__C[{C2}|{CT}]__P[{P}|{PT}].mp3";
-    await run(python, [script, "--pdf", files.pdf, "--audio", files.audio, "--output", output, "--model", "small", "--device", "cuda", "--minutes", fields.minutes || "10", "--mode", fields.mode || "smart", "--naming-template", template], { cwd: projectRoot, maxBuffer: 1024 * 1024 * 4 });
+    const inputBookName = fields.book_name?.trim() || path.basename(files.pdf).replace(/\.[^.]+$/, "");
+    const bookName = safeFileName(inputBookName);
+    await run(python, [script, "--pdf", files.pdf, "--audio", files.audio, "--output", output, "--model", "small", "--device", "cuda", "--minutes", fields.minutes || "10", "--mode", fields.mode || "smart", "--naming-template", template, "--book-name", bookName], { cwd: projectRoot, maxBuffer: 1024 * 1024 * 4 });
     const zip = zipOutput(output);
     const data = await zip;
-    response.writeHead(200, { "Content-Type": "application/zip", "Content-Disposition": "attachment; filename=chapter-cut-export.zip", "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" });
+    response.writeHead(200, { "Content-Type": "application/zip", "Content-Disposition": `attachment; filename=${bookName}_export.zip`, "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" });
     response.end(Buffer.from(data));
   } catch (error) {
     sendJson(response, 500, { error: error instanceof Error ? error.message.slice(-1800) : "The processing job failed." });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Mode = "smart" | "chapter" | "fixed";
 type Naming = string;
@@ -40,14 +40,14 @@ function renderName(template: string, book: string, totalParts: number) {
   return template.replaceAll("{B}", book).replaceAll("{T3}", String(totalParts).padStart(3, "0")).replaceAll("{T2}", String(totalParts).padStart(2, "0")).replaceAll("{T}", String(totalParts)).replaceAll("{CT2}", "10").replaceAll("{CT}", "10").replaceAll("{PT2}", "03").replaceAll("{PT}", "3");
 }
 
-function UploadZone({ kind, file, accept, onFile }: { kind: "PDF" | "Audiobook"; file: File | null; accept: string; onFile: (file: File) => void }) {
+function UploadZone({ kind, file, accept, onFile }: { kind: "Book" | "Audiobook"; file: File | null; accept: string; onFile: (file: File) => void }) {
   return (
     <label className={`upload-zone ${file ? "has-file" : ""}`}>
       <input type="file" accept={accept} onChange={(event) => event.target.files?.[0] && onFile(event.target.files[0])} />
-      <span className="upload-icon">{kind === "PDF" ? "▤" : "◉"}</span>
+      <span className="upload-icon">{kind === "Book" ? "▤" : "◉"}</span>
       <span className="upload-body">
-        <strong>{file ? file.name : `Drop your ${kind === "PDF" ? "book PDF" : "audiobook"} here`}</strong>
-        <small>{file ? `${(file.size / 1024 / 1024).toFixed(1)} MB · ready` : kind === "PDF" ? "or click to browse · PDF" : "or click to browse · MP3, M4A, WAV"}</small>
+        <strong>{file ? file.name : `Drop your ${kind === "Book" ? "book PDF or EPUB" : "audiobook"} here`}</strong>
+        <small>{file ? `${(file.size / 1024 / 1024).toFixed(1)} MB · ready` : kind === "Book" ? "or click to browse · PDF, EPUB" : "or click to browse · MP3, M4A, WAV"}</small>
       </span>
       <span className="upload-action">{file ? "Change" : "Browse"}</span>
       {file && <span className="upload-check">✓</span>}
@@ -79,6 +79,9 @@ export default function Home() {
   const selectedNaming = namingOptions.find((option) => option.id === naming) || namingOptions[0];
   const namePreview = renderName(selectedNaming.template, bookName || "Book_Name", totalParts);
   const exportSummary = hasSources ? `${mode === "chapter" ? "Whole-chapter files" : `${totalParts} chapter-safe listening sessions`} · processed from your uploaded files.` : "Upload both files to calculate the export.";
+  useEffect(() => {
+    if (downloadUrl) document.querySelectorAll<HTMLAnchorElement>('a[href^="blob:"]').forEach((link) => { link.download = `${bookName || "Book"}_export.zip`; });
+  }, [downloadUrl, bookName]);
 
   async function runExport() {
     if (!pdf || !audio) {
@@ -94,6 +97,7 @@ export default function Home() {
     form.append("mode", mode);
     form.append("minutes", String(minutes));
     form.append("template", selectedNaming.template);
+    form.append("book_name", bookNameInput.trim());
     try {
       const response = await fetch("http://127.0.0.1:3001/api/process", { method: "POST", body: form });
       if (!response.ok) {
@@ -116,7 +120,7 @@ export default function Home() {
 
         <div className="progress"><div className="progress-step current"><b>1</b><span>Sources</span></div><i /><div className="progress-step"><b>2</b><span>Chunking</span></div><i /><div className="progress-step"><b>3</b><span>Naming</span></div><i /><div className="progress-step"><b>4</b><span>Export</span></div></div>
 
-        <section className="step-section"><div className="section-top"><div><small>STEP 01</small><h2>Bring your book in</h2></div><span className="step-note">Two files, one aligned result</span></div><div className="uploads"><UploadZone kind="PDF" file={pdf} accept="application/pdf" onFile={setPdf} /><UploadZone kind="Audiobook" file={audio} accept="audio/*" onFile={setAudio} /></div><p className="privacy-note"><span>●</span> Files stay on this device during setup. Nothing is uploaded to a third-party service.</p></section>
+        <section className="step-section"><div className="section-top"><div><small>STEP 01</small><h2>Bring your book in</h2></div><span className="step-note">PDF or EPUB + audiobook</span></div><div className="uploads"><UploadZone kind="Book" file={pdf} accept="application/pdf,.epub" onFile={setPdf} /><UploadZone kind="Audiobook" file={audio} accept="audio/*" onFile={setAudio} /></div><p className="privacy-note"><span>●</span> Files stay on this device during setup. Nothing is uploaded to a third-party service.</p></section>
 
         <section className="step-section"><div className="section-top"><div><small>STEP 02</small><h2>Choose the cut logic</h2></div><span className="step-note">Every cut follows a sentence boundary</span></div><div className="choice-row">
           <button className={`choice ${mode === "smart" ? "selected" : ""}`} onClick={() => setMode("smart")}><span className="choice-symbol">✦</span><span><b>Smart sessions</b><small>Target a duration, never mix chapters</small></span><em>{mode === "smart" ? "Selected" : ""}</em></button>

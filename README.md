@@ -1,6 +1,6 @@
 # PDF-synced audiobook splitter
 
-This project splits any audiobook paired with a book PDF into approximately
+This project splits any audiobook paired with a book PDF or EPUB into approximately
 10-minute MP3 files. It uses the PDF as the text reference and local
 `faster-whisper` word timestamps to find chapter starts and sentence boundaries.
 Chapter boundaries are hard boundaries: no MP3 contains audio from two PDF
@@ -48,7 +48,7 @@ To change the bounded window size:
 python .\pdf_audiobook_splitter.py --window-seconds 180 --model small --device cuda
 ```
 
-When the folder contains exactly one PDF and one MP3, the inputs are detected
+When the folder contains exactly one PDF or EPUB and one MP3, the inputs are detected
 automatically. For multiple books, pass them explicitly:
 
 ```powershell

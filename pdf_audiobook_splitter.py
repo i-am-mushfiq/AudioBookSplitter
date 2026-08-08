@@ -14,14 +14,19 @@ import difflib
 import io
 import json
 import os
+import posixpath
 import re
 import subprocess
 import sys
+import zipfile
 import wave
 from collections import Counter
 from dataclasses import asdict, dataclass
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import unquote
+from xml.etree import ElementTree
 
 
 WORD_RE = re.compile(r"[a-z0-9]+(?:'[a-z0-9]+)?")
@@ -62,6 +67,8 @@ def norm(text: str) -> list[str]:
 
 
 def roman_to_int(value: str) -> int:
+    if value.isdigit():
+        return int(value)
     values = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
     total = 0
     previous = 0
@@ -95,6 +102,14 @@ def discover_input(directory: Path, suffix: str) -> Path:
     return matches[0]
 
 
+def discover_book(directory: Path) -> Path:
+    matches = sorted(list(directory.glob("*.pdf")) + list(directory.glob("*.epub")))
+    if len(matches) != 1:
+        names = ", ".join(path.name for path in matches) or "none"
+        raise SystemExit(f"Expected exactly one PDF or EPUB in {directory}; found: {names}. Pass --pdf explicitly.")
+    return matches[0]
+
+
 def extract_pdf(pdf_path: Path) -> tuple[list[str], list[Chapter]]:
     try:
         import pdfplumber
@@ -121,6 +136,86 @@ def extract_pdf(pdf_path: Path) -> tuple[list[str], list[Chapter]]:
                     chapters.append(Chapter(match.group(1).upper(), title, i + 1, " ".join(lines[line_index + 1:])))
                     break
     return pages, chapters
+
+
+class _EpubTextParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.title = ""
+        self.heading = ""
+        self._in_title = False
+        self._in_heading = False
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        self._in_title = tag == "title"
+        self._in_heading = tag in {"h1", "h2", "h3"}
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag == "title":
+            self._in_title = False
+        if tag in {"h1", "h2", "h3"}:
+            self._in_heading = False
+
+    def handle_data(self, data):
+        text = " ".join(data.split())
+        if not text:
+            return
+        if self._in_title:
+            self.title += " " + text
+        if self._in_heading and not self.heading:
+            self.heading = text
+        self.parts.append(text)
+
+
+def extract_epub(epub_path: Path) -> tuple[list[str], list[Chapter]]:
+    """Read EPUB spine documents in book order using only the standard library."""
+    with zipfile.ZipFile(epub_path) as archive:
+        container = ElementTree.fromstring(archive.read("META-INF/container.xml"))
+        rootfile = container.find(".//{*}rootfile")
+        if rootfile is None or not rootfile.attrib.get("full-path"):
+            raise SystemExit("EPUB has no readable OPF package.")
+        opf_path = unquote(rootfile.attrib["full-path"])
+        opf_dir = posixpath.dirname(opf_path)
+        opf = ElementTree.fromstring(archive.read(opf_path))
+        manifest = {
+            item.attrib["id"]: item.attrib.get("href", "")
+            for item in opf.findall(".//{*}manifest/{*}item")
+            if item.attrib.get("id")
+        }
+        spine_ids = [item.attrib.get("idref") for item in opf.findall(".//{*}spine/{*}itemref")]
+        sections: list[str] = []
+        chapters: list[Chapter] = []
+        for index, item_id in enumerate(spine_ids, 1):
+            href = manifest.get(item_id or "")
+            if not href:
+                continue
+            document_path = posixpath.normpath(posixpath.join(opf_dir, unquote(href.split("#", 1)[0])))
+            try:
+                source = archive.read(document_path).decode("utf-8", errors="replace")
+            except KeyError:
+                continue
+            parser = _EpubTextParser()
+            parser.feed(source)
+            text = " ".join(parser.parts).strip()
+            if not text:
+                continue
+            title = (parser.heading or parser.title or f"Section {index}").strip()
+            sections.append(text)
+            chapters.append(Chapter(str(index), title, len(sections), text))
+    if not chapters:
+        raise SystemExit("EPUB contained no readable spine sections.")
+    return sections, chapters
+
+
+def extract_book(book_path: Path) -> tuple[list[str], list[Chapter], str]:
+    if book_path.suffix.lower() == ".epub":
+        pages, chapters = extract_epub(book_path)
+        return pages, chapters, "epub"
+    pages, chapters = extract_pdf(book_path)
+    return pages, chapters, "pdf"
 
 
 def _extract_audio_window(audio: Path, start: float, duration: float):
@@ -307,7 +402,7 @@ def render_filename(template: str, item: Cut, book_name: str, total_parts: int, 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--pdf", type=Path, help="PDF book; if omitted, use the only PDF in the current folder")
+    parser.add_argument("--pdf", type=Path, help="PDF or EPUB book; if omitted, use the only book file in the current folder")
     parser.add_argument("--audio", type=Path, help="Audiobook; if omitted, use the only MP3 in the current folder")
     parser.add_argument("--output", type=Path, default=Path("output"))
     parser.add_argument("--model", default="small", help="Whisper model: tiny, base, small, medium, large-v3")
@@ -317,17 +412,18 @@ def main() -> None:
     parser.add_argument("--mode", choices=["smart", "chapter", "fixed"], default="smart")
     parser.add_argument("--naming-template", default="[{I2}|{T}]_{B}__C[{C2}|{CT}]__P[{P}|{PT}].mp3")
     parser.add_argument("--window-seconds", type=int, default=300, help="Bounded transcription window size")
+    parser.add_argument("--book-name", help="Override the book name used in output filenames")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    args.pdf = args.pdf or discover_input(Path.cwd(), ".pdf")
+    args.pdf = args.pdf or discover_book(Path.cwd())
     args.audio = args.audio or discover_input(Path.cwd(), ".mp3")
     for path in (args.pdf, args.audio):
         if not path.exists():
             parser.error(f"File not found: {path}")
 
-    pages, chapters = extract_pdf(args.pdf)
-    book_name = derive_book_name(args.pdf, pages)
+    pages, chapters, source_type = extract_book(args.pdf)
+    book_name = safe_name(args.book_name) if args.book_name else derive_book_name(args.pdf, pages)
     duration = audio_duration(args.audio)
     cache = args.output / "transcript.json"
     words = transcribe(args.audio, cache, args.model, args.device, duration, args.window_seconds)
@@ -338,7 +434,7 @@ def main() -> None:
     cursor = 0.0
     for page_number, page_text in enumerate(pages, 1):
         page_lines = [line.strip() for line in page_text.splitlines() if line.strip()]
-        if page_lines and page_lines[0].lower().startswith("animal farm by george orwell"):
+        if source_type == "pdf" and page_lines and page_lines[0].lower().startswith(book_name.replace("_", " ").lower()):
             page_lines = page_lines[1:]
         page_start = find_phrase(words, " ".join(page_lines), cursor)
         if page_start is not None:
@@ -407,7 +503,7 @@ def main() -> None:
             render_chunk(args.audio, args.output / filename, item.start, item.end, args.fade)
 
     report = {
-        "book_name": book_name, "total_chapters": total_chapters, "total_parts": total_parts,
+        "book_name": book_name, "source_type": source_type, "total_chapters": total_chapters, "total_parts": total_parts,
         "filename_pattern": args.naming_template,
         "source_pdf": str(args.pdf), "source_audio": str(args.audio),
         "audio_duration_seconds": duration, "pdf_pages": len(pages),
