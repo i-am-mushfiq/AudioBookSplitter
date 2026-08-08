@@ -1,16 +1,16 @@
 import type { BookSyncOverlayEntry } from "../booksync/types";
 
-export function safeChapterMarkup(source: string): string {
+export async function safeChapterMarkup(source: string): Promise<string> {
+  const { default: DOMPurify } = await import("dompurify");
   const document = new DOMParser().parseFromString(source, "text/html");
-  document.querySelectorAll("script, style, iframe, object, embed, link, meta, base").forEach((node) => node.remove());
-  document.body.querySelectorAll("*").forEach((element) => {
-    for (const attribute of [...element.attributes]) {
-      if (attribute.name.startsWith("on") || ["src", "href", "style"].includes(attribute.name)) {
-        element.removeAttribute(attribute.name);
-      }
-    }
+  return DOMPurify.sanitize(document.body.innerHTML, {
+    ALLOWED_TAGS: ["main", "article", "section", "header", "footer", "nav", "div", "p", "span", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "code", "ol", "ul", "li", "dl", "dt", "dd", "table", "thead", "tbody", "tfoot", "tr", "th", "td", "em", "strong", "b", "i", "u", "s", "small", "sub", "sup", "br", "hr"],
+    ALLOWED_ATTR: ["id", "class", "lang", "dir", "title", "role", "aria-label", "aria-hidden", "colspan", "rowspan"],
+    ALLOW_DATA_ATTR: false,
+    ALLOW_ARIA_ATTR: true,
+    FORBID_TAGS: ["script", "style", "svg", "math", "form", "input", "button", "textarea", "select", "option", "iframe", "object", "embed", "audio", "video", "source", "img", "link", "meta", "base"],
+    FORBID_ATTR: ["style", "src", "srcset", "href", "xlink:href", "formaction", "action"],
   });
-  return document.body.innerHTML;
 }
 
 export function activeEntry(entries: BookSyncOverlayEntry[], globalMs: number) {

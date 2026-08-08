@@ -615,6 +615,15 @@ Exit gate:
 
 - A complete multi-hour EPUB audiobook can be read and played without synchronization drift, unbounded memory growth, or chapter transition failures.
 
+### Milestone 3.5: P0 trust, storage, and playback hardening — complete
+
+- Browser-side schema, reference, size, and checksum validation
+- ZIP bomb, path traversal, collision, and resource limits
+- Maintained allowlist-based EPUB sanitization
+- Atomic, cancellable, quota-aware IndexedDB imports
+- Corruption detection and prior-copy preservation
+- Race-safe logical playback and cross-asset transition tests
+
 ### Milestone 4: PDF reader
 
 Deliverables:
