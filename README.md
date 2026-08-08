@@ -123,6 +123,8 @@ not claim that acoustic forced alignment or manual timing evaluation occurred.
 
 ## BookSync v1 contract
 
+The frontend includes a local synchronized reader at `/reader`. Import a BookSync ZIP to keep a private browser library, render EPUB chapters, play the logical audiobook timeline, highlight the active sentence, navigate, adjust playback and typography, and resume where you stopped. See [`docs/milestone-3.md`](docs/milestone-3.md).
+
 Milestone 0 of the synchronized-reader roadmap defines the provider-neutral
 BookSync package contract. The versioned JSON Schemas are in `schemas/`, the
 normative package rules and architecture decisions are in `docs/`, and a

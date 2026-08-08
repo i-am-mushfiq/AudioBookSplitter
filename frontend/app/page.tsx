@@ -114,7 +114,7 @@ export default function Home() {
 
   return (
     <main className="site">
-      <header className="nav"><div className="logo"><span>↗</span> chapter<span>.</span>cut</div><div className="nav-right"><span className="green-dot" /> Private workspace <button className="question">?</button></div></header>
+      <header className="nav"><div className="logo"><span>↗</span> chapter<span>.</span>cut</div><div className="nav-right"><a href="/reader">Open reader</a><span className="green-dot" /> Private workspace <button className="question">?</button></div></header>
       <div className="page">
         <section className="intro"><div><p className="overline">AUDIOBOOK PREP STUDIO</p><h1>Make a book<br /><span>easy to pick up.</span></h1><p className="lede">Upload two files. Set the rules. Get chapter-safe listening sessions with names you can actually understand.</p></div><div className="intro-badge"><strong>{hasSources ? "✓" : "—"}</strong><span>{hasSources ? "sources<br />ready" : "awaiting<br />sources"}</span></div></section>
 

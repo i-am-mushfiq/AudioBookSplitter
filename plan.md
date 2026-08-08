@@ -596,7 +596,7 @@ Acceptance targets for clean EPUB/audiobook pairs:
 
 The targets must be measured against manually labeled samples, not inferred from the alignment system itself.
 
-### Milestone 3: local EPUB reader
+### Milestone 3: local EPUB reader — implemented
 
 Deliverables:
 
