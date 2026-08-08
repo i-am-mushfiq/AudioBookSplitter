@@ -1,0 +1,27 @@
+{
+  "format": "booksync-checksums",
+  "schema_version": 1,
+  "algorithm": "sha256",
+  "files": [
+    {
+      "path": "content/chapter-001.html",
+      "sha256": "230a0e9c67b4a5f104eac495b1e7820c7204586f2b13caa1b3566b08b552ce9b",
+      "byte_length": 312
+    },
+    {
+      "path": "audio/audio-001.wav",
+      "sha256": "279c7694410a3fb74ab203bad31c60ea9b25852c1d49c553db592245dbabdf48",
+      "byte_length": 32078
+    },
+    {
+      "path": "overlays/chapter-001.json",
+      "sha256": "53a69e5bcd54882c86fb773af97286854ed75c14900704d2ed94d5f989af39c9",
+      "byte_length": 773
+    },
+    {
+      "path": "transcript/transcript.json",
+      "sha256": "f9ec3530bc35a23e1182cec082461caf6a75976e88d2d38c0e6146d96cb66900",
+      "byte_length": 168
+    }
+  ]
+}

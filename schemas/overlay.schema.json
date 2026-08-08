@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://booksync.local/schemas/v1/overlay.schema.json",
+  "title": "BookSync chapter overlay v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "schema_version", "overlay_id", "book_id", "chapter_id", "entries"],
+  "properties": {
+    "format": { "const": "booksync-overlay" },
+    "schema_version": { "const": 1 },
+    "overlay_id": { "$ref": "#/$defs/internalId" },
+    "book_id": { "$ref": "#/$defs/bookId" },
+    "chapter_id": { "$ref": "#/$defs/internalId" },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "$defs": {
+    "bookId": {
+      "type": "string",
+      "pattern": "^book_[a-f0-9]{64}$"
+    },
+    "internalId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\]+$"
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sentence_id",
+        "ordinal",
+        "text",
+        "text_locator",
+        "audio_locator",
+        "confidence",
+        "alignment"
+      ],
+      "properties": {
+        "sentence_id": { "$ref": "#/$defs/internalId" },
+        "ordinal": { "type": "integer", "minimum": 1 },
+        "text": { "type": "string", "minLength": 1 },
+        "text_locator": {
+          "oneOf": [
+            { "$ref": "#/$defs/epubLocator" },
+            { "$ref": "#/$defs/pdfLocator" }
+          ]
+        },
+        "audio_locator": {
+          "oneOf": [
+            { "$ref": "#/$defs/audioLocator" },
+            { "type": "null" }
+          ]
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "alignment": { "enum": ["exact", "approximate", "unmatched"] },
+        "reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "words": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/wordTiming" }
+        }
+      }
+    },
+    "epubLocator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "document", "element_id"],
+      "properties": {
+        "type": { "const": "epub" },
+        "document": { "$ref": "#/$defs/relativePath" },
+        "element_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "pdfLocator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "page", "spans"],
+      "properties": {
+        "type": { "const": "pdf" },
+        "page": { "type": "integer", "minimum": 1 },
+        "spans": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/pdfSpan" }
+        }
+      }
+    },
+    "pdfSpan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text_item", "start_character", "end_character"],
+      "properties": {
+        "text_item": { "type": "integer", "minimum": 0 },
+        "start_character": { "type": "integer", "minimum": 0 },
+        "end_character": { "type": "integer", "minimum": 1 },
+        "quad": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": { "type": "number" }
+        }
+      }
+    },
+    "audioLocator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset_id", "start_ms", "end_ms", "global_start_ms"],
+      "properties": {
+        "asset_id": { "$ref": "#/$defs/internalId" },
+        "start_ms": { "type": "integer", "minimum": 0 },
+        "end_ms": { "type": "integer", "minimum": 1 },
+        "global_start_ms": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "wordTiming": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "start_ms", "end_ms"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1 },
+        "start_ms": { "type": "integer", "minimum": 0 },
+        "end_ms": { "type": "integer", "minimum": 1 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
+  }
+}

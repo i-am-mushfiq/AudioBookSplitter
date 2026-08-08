@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://booksync.local/schemas/v1/checksums.schema.json",
+  "title": "BookSync package checksums v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "schema_version", "algorithm", "files"],
+  "properties": {
+    "format": { "const": "booksync-checksums" },
+    "schema_version": { "const": 1 },
+    "algorithm": { "const": "sha256" },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256", "byte_length"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\]+$"
+          },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "byte_length": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  }
+}

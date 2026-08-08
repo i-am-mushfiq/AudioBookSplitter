@@ -78,6 +78,52 @@ To inspect the planned cuts without rendering MP3s:
 python .\pdf_audiobook_splitter.py --dry-run
 ```
 
-Outputs are placed in `output/`: numbered MP3 chunks, `manifest.json`, and the
-cached `transcript.json`. The audio/PDF cannot be perfectly synchronized from
-file metadata alone, so the Whisper alignment step is intentionally required.
+Outputs are placed in `output/`: numbered MP3 chunks, the legacy
+`manifest.json`, the cached `transcript.json`, and a validated
+`<Book_Name>.booksync/` package. The BookSync package contains the source book,
+stable audio assets, canonical chapter HTML, sentence overlays, checksums, and
+its own versioned manifest. The audio and book cannot be synchronized from file
+metadata alone, so the Whisper alignment step is intentionally required.
+
+The original command remains the compatibility entry point, while the
+implementation is divided into focused modules under `processor/`:
+
+```text
+processor/
+├── extractors/
+├── transcription/
+├── alignment/
+├── audio/
+├── packaging/
+└── cli.py
+```
+
+To reuse a transcript stored elsewhere:
+
+```powershell
+python .\pdf_audiobook_splitter.py --pdf .\book.epub --audio .\book.mp3 --transcript-cache .\cache\transcript.json
+```
+
+Use `--skip-booksync` when only the legacy MP3 export is wanted.
+
+## BookSync v1 contract
+
+Milestone 0 of the synchronized-reader roadmap defines the provider-neutral
+BookSync package contract. The versioned JSON Schemas are in `schemas/`, the
+normative package rules and architecture decisions are in `docs/`, and a
+generated, copyright-free fixture is in `examples/minimal.booksync/`.
+
+Validate the example package:
+
+```powershell
+conda run --no-capture-output -n animal-farm-splitter python .\tools\validate_booksync_package.py .\examples\minimal.booksync
+```
+
+Run the contract tests:
+
+```powershell
+conda run --no-capture-output -n animal-farm-splitter python -m unittest tests.test_booksync_contract -v
+```
+
+The processor emits BookSync v1 packages by default. See `plan.md` for the
+remaining reader and storage roadmap.

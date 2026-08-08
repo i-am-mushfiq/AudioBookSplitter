@@ -16,6 +16,8 @@ frontend/dist/
 frontend/public/*.zip
 
 # Local test books and generated test exports
+test*-output*/
 test1-output/
+test1/
 test2-output/
 test2/

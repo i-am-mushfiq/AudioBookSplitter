@@ -1,0 +1,78 @@
+{
+  "format": "booksync",
+  "schema_version": 1,
+  "book_id": "book_c6fff5bbe9241f858a6c207884d92df1ccd24dd70716439ffdc6574d1068009e",
+  "title": "Synthetic Contract Fixture",
+  "author": null,
+  "language": "en",
+  "source": {
+    "type": "epub",
+    "sha256": "3241a32f648eed27fcf11e374bc16475cf4ee8bf2ea01bb9464fb9ef56a43172",
+    "byte_length": 28,
+    "original_filename": "synthetic.epub"
+  },
+  "audiobook_sha256": "279c7694410a3fb74ab203bad31c60ea9b25852c1d49c553db592245dbabdf48",
+  "total_duration_ms": 1000,
+  "chapters": [
+    {
+      "id": "ch_0001",
+      "index": 1,
+      "label": "1",
+      "title": "Chapter One",
+      "content_path": "content/chapter-001.html",
+      "content_sha256": "230a0e9c67b4a5f104eac495b1e7820c7204586f2b13caa1b3566b08b552ce9b",
+      "content_byte_length": 312,
+      "overlay_id": "ov_0001",
+      "audio_start_ms": 0,
+      "audio_end_ms": 1000
+    }
+  ],
+  "audio_assets": [
+    {
+      "id": "aud_0001",
+      "path": "audio/audio-001.wav",
+      "media_type": "audio/wav",
+      "sha256": "279c7694410a3fb74ab203bad31c60ea9b25852c1d49c553db592245dbabdf48",
+      "byte_length": 32078,
+      "duration_ms": 1000,
+      "global_start_ms": 0,
+      "display_filename": "Synthetic_Contract_Fixture_C01_P01.wav"
+    }
+  ],
+  "overlay_assets": [
+    {
+      "id": "ov_0001",
+      "chapter_id": "ch_0001",
+      "path": "overlays/chapter-001.json",
+      "sha256": "53a69e5bcd54882c86fb773af97286854ed75c14900704d2ed94d5f989af39c9",
+      "byte_length": 773,
+      "entry_count": 1
+    }
+  ],
+  "transcript": {
+    "path": "transcript/transcript.json",
+    "media_type": "application/json",
+    "sha256": "f9ec3530bc35a23e1182cec082461caf6a75976e88d2d38c0e6146d96cb66900",
+    "byte_length": 168
+  },
+  "alignment": {
+    "sentence_count": 1,
+    "aligned_sentence_count": 1,
+    "exact_sentence_count": 1,
+    "approximate_sentence_count": 0,
+    "unmatched_sentence_count": 0,
+    "sentence_coverage": 1.0,
+    "thresholds": {
+      "exact_min": 0.85,
+      "approximate_min": 0.6
+    }
+  },
+  "created_at": "2026-08-09T00:00:00Z",
+  "generator": {
+    "name": "booksync-contract-fixture",
+    "version": "1.0.0",
+    "settings": {
+      "purpose": "schema validation"
+    }
+  }
+}

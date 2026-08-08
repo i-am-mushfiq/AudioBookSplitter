@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://booksync.local/schemas/v1/manifest.schema.json",
+  "title": "BookSync package manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "schema_version",
+    "book_id",
+    "title",
+    "language",
+    "source",
+    "audiobook_sha256",
+    "total_duration_ms",
+    "chapters",
+    "audio_assets",
+    "overlay_assets",
+    "alignment",
+    "created_at",
+    "generator"
+  ],
+  "properties": {
+    "format": { "const": "booksync" },
+    "schema_version": { "const": 1 },
+    "book_id": { "$ref": "#/$defs/bookId" },
+    "title": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "author": { "type": ["string", "null"], "maxLength": 500 },
+    "language": {
+      "type": "string",
+      "pattern": "^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$"
+    },
+    "source": { "$ref": "#/$defs/source" },
+    "audiobook_sha256": { "$ref": "#/$defs/sha256" },
+    "cover": { "$ref": "#/$defs/cover" },
+    "total_duration_ms": { "type": "integer", "minimum": 1 },
+    "chapters": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/chapter" }
+    },
+    "audio_assets": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/audioAsset" }
+    },
+    "overlay_assets": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/overlayAsset" }
+    },
+    "transcript": { "$ref": "#/$defs/fileAsset" },
+    "alignment": { "$ref": "#/$defs/alignmentSummary" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "generator": { "$ref": "#/$defs/generator" }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "bookId": {
+      "type": "string",
+      "pattern": "^book_[a-f0-9]{64}$"
+    },
+    "internalId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\]+$"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "sha256", "byte_length", "original_filename"],
+      "properties": {
+        "type": { "enum": ["epub", "pdf"] },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "byte_length": { "type": "integer", "minimum": 0 },
+        "original_filename": { "type": "string", "minLength": 1 },
+        "included_path": { "$ref": "#/$defs/relativePath" }
+      }
+    },
+    "cover": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "media_type", "sha256", "byte_length"],
+      "properties": {
+        "path": { "$ref": "#/$defs/relativePath" },
+        "media_type": { "type": "string", "pattern": "^image/" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "byte_length": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "chapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "index",
+        "label",
+        "title",
+        "content_path",
+        "content_sha256",
+        "content_byte_length",
+        "overlay_id",
+        "audio_start_ms",
+        "audio_end_ms"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/internalId" },
+        "index": { "type": "integer", "minimum": 1 },
+        "label": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "title": { "type": ["string", "null"], "maxLength": 500 },
+        "content_path": { "$ref": "#/$defs/relativePath" },
+        "content_sha256": { "$ref": "#/$defs/sha256" },
+        "content_byte_length": { "type": "integer", "minimum": 1 },
+        "overlay_id": { "$ref": "#/$defs/internalId" },
+        "audio_start_ms": { "type": "integer", "minimum": 0 },
+        "audio_end_ms": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "audioAsset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "path",
+        "media_type",
+        "sha256",
+        "byte_length",
+        "duration_ms",
+        "global_start_ms",
+        "display_filename"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/internalId" },
+        "path": { "$ref": "#/$defs/relativePath" },
+        "media_type": { "type": "string", "pattern": "^audio/" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "byte_length": { "type": "integer", "minimum": 1 },
+        "duration_ms": { "type": "integer", "minimum": 1 },
+        "global_start_ms": { "type": "integer", "minimum": 0 },
+        "display_filename": { "type": "string", "minLength": 1 }
+      }
+    },
+    "overlayAsset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "chapter_id", "path", "sha256", "byte_length", "entry_count"],
+      "properties": {
+        "id": { "$ref": "#/$defs/internalId" },
+        "chapter_id": { "$ref": "#/$defs/internalId" },
+        "path": { "$ref": "#/$defs/relativePath" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "byte_length": { "type": "integer", "minimum": 1 },
+        "entry_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "fileAsset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "media_type", "sha256", "byte_length"],
+      "properties": {
+        "path": { "$ref": "#/$defs/relativePath" },
+        "media_type": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "byte_length": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "alignmentSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sentence_count",
+        "aligned_sentence_count",
+        "exact_sentence_count",
+        "approximate_sentence_count",
+        "unmatched_sentence_count",
+        "sentence_coverage",
+        "thresholds"
+      ],
+      "properties": {
+        "sentence_count": { "type": "integer", "minimum": 0 },
+        "aligned_sentence_count": { "type": "integer", "minimum": 0 },
+        "exact_sentence_count": { "type": "integer", "minimum": 0 },
+        "approximate_sentence_count": { "type": "integer", "minimum": 0 },
+        "unmatched_sentence_count": { "type": "integer", "minimum": 0 },
+        "sentence_coverage": { "type": "number", "minimum": 0, "maximum": 1 },
+        "thresholds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["exact_min", "approximate_min"],
+          "properties": {
+            "exact_min": { "type": "number", "minimum": 0, "maximum": 1 },
+            "approximate_min": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        }
+      }
+    },
+    "generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "settings": { "type": "object" }
+      }
+    }
+  }
+}

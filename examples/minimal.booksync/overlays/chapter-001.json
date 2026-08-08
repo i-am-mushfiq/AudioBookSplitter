@@ -1,0 +1,28 @@
+{
+  "format": "booksync-overlay",
+  "schema_version": 1,
+  "overlay_id": "ov_0001",
+  "book_id": "book_c6fff5bbe9241f858a6c207884d92df1ccd24dd70716439ffdc6574d1068009e",
+  "chapter_id": "ch_0001",
+  "entries": [
+    {
+      "sentence_id": "sent_0001_000001",
+      "ordinal": 1,
+      "text": "This is a synthetic sentence for validating the BookSync package contract.",
+      "text_locator": {
+        "type": "epub",
+        "document": "content/chapter-001.html",
+        "element_id": "sent_0001_000001"
+      },
+      "audio_locator": {
+        "asset_id": "aud_0001",
+        "start_ms": 0,
+        "end_ms": 1000,
+        "global_start_ms": 0
+      },
+      "confidence": 0.99,
+      "alignment": "exact",
+      "reasons": ["synthetic-contract-fixture"]
+    }
+  ]
+}
