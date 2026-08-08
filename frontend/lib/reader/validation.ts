@@ -126,6 +126,11 @@ export async function validateOverlay(value: unknown, manifest: BookSyncManifest
     if (!entry.audio_locator) continue;
     const asset = audio.get(entry.audio_locator.asset_id);
     if (!asset || entry.audio_locator.end_ms <= entry.audio_locator.start_ms || entry.audio_locator.end_ms > asset.duration_ms) throw new PackageValidationError(`Invalid audio locator in ${expectedPath}.`);
+    let previousWordEnd = 0;
+    for (const word of entry.words ?? []) {
+      if (word.start_ms < previousWordEnd || word.end_ms <= word.start_ms) throw new PackageValidationError(`Invalid word timing in ${expectedPath}: ${entry.sentence_id}.`);
+      previousWordEnd = word.end_ms;
+    }
     const expectedGlobal = asset.global_start_ms + entry.audio_locator.start_ms;
     if (entry.audio_locator.global_start_ms !== expectedGlobal || expectedGlobal < previousGlobal) throw new PackageValidationError(`Non-monotonic or inconsistent global timing in ${expectedPath}.`);
     previousGlobal = expectedGlobal;

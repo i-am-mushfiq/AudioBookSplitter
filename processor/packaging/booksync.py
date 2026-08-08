@@ -4,6 +4,7 @@ import hashlib
 import html
 import json
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -161,6 +162,49 @@ def audio_locator(match: SentenceAlignment, cuts: list[Cut]) -> dict[str, Any] |
     }
 
 
+def word_timings(sentence: CanonicalSentence, match: SentenceAlignment, words: list[Word]) -> list[dict[str, Any]]:
+    """Return source-text words with sentence-relative audiobook timings."""
+    if match.start is None or match.end is None:
+        return []
+    source_words = re.findall(r"\S+", sentence.text)
+    spoken = [word for word in words if word.end > match.start and word.start < match.end]
+    if not source_words or not spoken:
+        return []
+
+    source_norm = [" ".join(re.findall(r"\w+", item.casefold())) for item in source_words]
+    spoken_norm = [" ".join(re.findall(r"\w+", item.text.casefold())) for item in spoken]
+    used: set[int] = set()
+    mapped: list[Word | None] = []
+    cursor = 0
+    for index, token in enumerate(source_norm):
+        candidates = [candidate for candidate in range(cursor, min(len(spoken), cursor + 5)) if spoken_norm[candidate] == token]
+        if candidates:
+            selected = candidates[0]
+            cursor = selected + 1
+            used.add(selected)
+            mapped.append(spoken[selected])
+            continue
+        proportional = min(len(spoken) - 1, round(index * (len(spoken) - 1) / max(1, len(source_words) - 1)))
+        mapped.append(spoken[proportional] if proportional not in used else None)
+        used.add(proportional)
+
+    duration_ms = max(1, round((match.end - match.start) * 1000))
+    if duration_ms < len(source_words):
+        return []
+    result: list[dict[str, Any]] = []
+    previous_end = 0
+    for index, (text, timing) in enumerate(zip(source_words, mapped)):
+        fallback_start = round(duration_ms * index / len(source_words))
+        fallback_end = round(duration_ms * (index + 1) / len(source_words))
+        remaining_words = len(source_words) - index - 1
+        latest_end = duration_ms - remaining_words
+        start_ms = min(latest_end - 1, max(previous_end, round((timing.start - match.start) * 1000) if timing else fallback_start))
+        end_ms = min(latest_end, max(start_ms + 1, round((timing.end - match.start) * 1000) if timing else fallback_end))
+        result.append({"text": text, "start_ms": start_ms, "end_ms": end_ms})
+        previous_end = end_ms
+    return result
+
+
 def build_overlay_entries(
     source_type: str,
     chapter_range: ChapterRange,
@@ -215,6 +259,7 @@ def build_overlay_entries(
                     "confidence": match.confidence,
                     "alignment": match.state,
                     "reasons": reasons,
+                    "words": word_timings(sentence, match, words),
                 }
             )
     return entries

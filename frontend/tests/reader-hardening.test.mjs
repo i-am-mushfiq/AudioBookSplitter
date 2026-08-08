@@ -43,6 +43,14 @@ test("binary sentence lookup remains stable at boundaries", () => {
   assert.equal(content.activeEntry(entries, 200)?.sentence_id, "sent_1");
 });
 
+test("word lookup follows sentence-relative timing", () => {
+  const entry = { sentence_id: "sent_1", ordinal: 1, text: "One two", text_locator: { type: "epub", document: "content/a.html", element_id: "sent_1" }, audio_locator: { asset_id: "aud_1", start_ms: 100, end_ms: 500, global_start_ms: 2100 }, confidence: 1, alignment: "exact", words: [{ text: "One", start_ms: 0, end_ms: 180 }, { text: "two", start_ms: 180, end_ms: 400 }] };
+  assert.equal(content.activeWordIndex(entry, 2100), 0);
+  assert.equal(content.activeWordIndex(entry, 2280), 1);
+  assert.equal(content.activeWordIndex(entry, 2500), 1);
+  assert.equal(content.activeWordIndex(entry, 2000), -1);
+});
+
 const privatePackage = resolve(root, "..", "test1-milestone2-output", "Animal_Farm.booksync");
 test("validates every declared file in the available full-book package", { skip: !existsSync(privatePackage) }, async () => {
   const manifest = await validation.validateManifest(JSON.parse(await readFile(resolve(privatePackage, "manifest.json"), "utf8")));

@@ -29,6 +29,18 @@ export function activeEntry(entries: BookSyncOverlayEntry[], globalMs: number) {
   return high >= 0 ? entries[high] : undefined;
 }
 
+export function activeWordIndex(entry: BookSyncOverlayEntry | undefined, globalMs: number) {
+  const words = entry?.words;
+  const locator = entry?.audio_locator;
+  if (!words?.length || !locator) return -1;
+  const elapsed = globalMs - locator.global_start_ms;
+  if (elapsed < 0) return -1;
+  const exact = words.findIndex((word) => elapsed >= word.start_ms && elapsed < word.end_ms);
+  if (exact >= 0) return exact;
+  for (let index = words.length - 1; index >= 0; index--) if (elapsed >= words[index].start_ms) return index;
+  return -1;
+}
+
 export function formatClock(milliseconds: number) {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000));
   const hours = Math.floor(seconds / 3600);

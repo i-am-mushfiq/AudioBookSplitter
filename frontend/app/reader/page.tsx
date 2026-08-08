@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { BookSyncOverlay, BookSyncOverlayEntry } from "../../lib/booksync/types";
-import { activeEntry, formatClock, safeChapterMarkup } from "../../lib/reader/content";
+import { activeEntry, activeWordIndex, formatClock, safeChapterMarkup } from "../../lib/reader/content";
 import { deleteLocalBook, importBookSyncZip, listLocalBooks, loadPosition, readPackageFile, readPackageText, savePosition, verifyLocalBook, type ImportProgress, type LocalBookRecord } from "../../lib/reader/library";
 import "./reader.css";
 import "./highlight.css";
@@ -133,10 +133,39 @@ export default function ReaderPage() {
       if (node !== element) node.classList.remove("booksync-active");
     });
     if (element && !element.classList.contains("booksync-active")) element.classList.add("booksync-active");
+    if (element && currentSentence.words?.length && !element.querySelector("[data-booksync-word]")) {
+      const parts = element.textContent?.match(/\S+|\s+/g) ?? [];
+      const visibleWords = parts.filter((part) => /\S/.test(part));
+      if (visibleWords.length === currentSentence.words.length) {
+        element.replaceChildren();
+        let wordIndex = 0;
+        for (const part of parts) {
+          if (!/\S/.test(part)) { element.append(document.createTextNode(part)); continue; }
+          const span = document.createElement("span");
+          span.dataset.booksyncWord = String(wordIndex++);
+          span.textContent = part;
+          element.append(span);
+        }
+      }
+    }
     const changed = highlightedSentenceId.current !== currentSentence.sentence_id;
     highlightedSentenceId.current = currentSentence.sentence_id;
     if (changed && follow && playing) element?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [currentSentence, follow, playing, markup]);
+
+  useEffect(() => {
+    const root = readerRef.current;
+    if (!root) return;
+    const index = activeWordIndex(currentSentence, globalMs);
+    const sentence = currentSentence ? document.getElementById(currentSentence.sentence_id) : null;
+    const activeWord = sentence && root.contains(sentence) && index >= 0
+      ? sentence.querySelector(`[data-booksync-word="${index}"]`)
+      : null;
+    root.querySelectorAll(".booksync-word-active").forEach((node) => {
+      if (node !== activeWord) node.classList.remove("booksync-word-active");
+    });
+    activeWord?.classList.add("booksync-word-active");
+  }, [currentSentence, globalMs]);
 
   useEffect(() => {
     if (!manifest || !chapter || playing) return;
