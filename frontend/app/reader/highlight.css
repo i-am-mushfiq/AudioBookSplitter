@@ -5,12 +5,11 @@
 .book-content .booksync-active .booksync-word-active {
   background: #079447;
   box-shadow: 0 0 0 2px #079447;
-  color: #fff;
+  color: inherit;
   border-radius: 2px;
 }
 
 .theme-night .book-content .booksync-active .booksync-word-active {
   background: #12a85a;
   box-shadow: 0 0 0 2px #12a85a;
-  color: #07130c;
 }
