@@ -1,26 +1,37 @@
-# PDF-synced audiobook splitter
+# AudioBookSplitter / BookSync
 
-This project splits any audiobook paired with a book PDF or EPUB into approximately
-10-minute MP3 files. It uses the PDF as the text reference and local
-`faster-whisper` word timestamps to find chapter starts and sentence boundaries.
-Chapter boundaries are hard boundaries: no MP3 contains audio from two PDF
-chapters. Longer chapters become numbered parts. Output names include the book
-name, total chapter count, and total fraction count, for example:
-`Animal_Farm__Chapter_01_of_10__Part_01_of_25.mp3`.
-Each output chunk receives a short fade-in/fade-out to prevent clicks or abrupt
-cutoffs. `output/manifest.json` records the audio times and estimated PDF pages.
+BookSync turns a PDF or EPUB and its matching audiobook into chapter-safe listening files and a synchronized local reading package.
 
-## Setup
+It can:
 
-The included `environment.yml` creates a Conda environment. CPU mode works on
-any modern machine; CUDA mode is substantially faster with an NVIDIA GPU.
+- detect chapters from PDF or EPUB content;
+- transcribe long audiobooks in bounded, resumable windows with `faster-whisper`;
+- align book sentences to audiobook timestamps;
+- split audio near the requested duration without crossing chapter boundaries;
+- export readable, configurable MP3 filenames and a downloadable ZIP;
+- build a validated `.booksync` package containing canonical chapter HTML, audio assets, checksums, sentence overlays, and optional word timings;
+- highlight the spoken sentence and current word in the browser reader;
+- preserve a private offline library, playback speed, chapter, and listening position in browser storage.
+
+## Requirements
+
+- Windows, macOS, or Linux with Python 3.11+
+- FFmpeg and FFprobe available on `PATH`
+- Node.js 22.13+ for the web interface
+- NVIDIA GPU and CUDA are optional but recommended for transcription
+
+## Python setup
+
+Using Conda:
 
 ```powershell
 conda env create -f environment.yml
-conda activate pdf-audiobook-splitter
+conda activate animal-farm-splitter
 ```
 
-If Conda is unavailable:
+The historical environment name is retained for compatibility; the application itself is book-agnostic.
+
+Using `venv`:
 
 ```powershell
 python -m venv .venv
@@ -28,121 +39,147 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-FFmpeg must be installed and available on `PATH` (`ffmpeg` and `ffprobe`).
+## Command-line processing
 
-## Run
-
-The first run downloads the selected Whisper model and writes a reusable
-transcript cache. Transcription is bounded to five-minute windows by default,
-so long audiobooks do not create a giant NumPy STFT in memory. Progress is
-checkpointed after every window and resumes from the partial transcript if the
-job is interrupted. The default `small` model is a good quality/speed balance.
+When the working directory contains exactly one PDF or EPUB and one audiobook, inputs can be detected automatically:
 
 ```powershell
-python .\pdf_audiobook_splitter.py --model small --device cpu
+python .\pdf_audiobook_splitter.py --device cuda --model small
 ```
 
-To change the bounded window size:
+Explicit inputs and output directory:
 
 ```powershell
-python .\pdf_audiobook_splitter.py --window-seconds 180 --model small --device cuda
+python .\pdf_audiobook_splitter.py `
+  --book .\book.epub `
+  --audio .\audiobook.mp3 `
+  --output .\output `
+  --device cuda `
+  --minutes 10 `
+  --mode smart
 ```
 
-When the folder contains exactly one PDF or EPUB and one MP3, the inputs are detected
-automatically. For multiple books, pass them explicitly:
+Useful options:
+
+- `--device cpu|cuda`: transcription device.
+- `--model small|medium|...`: Whisper model.
+- `--window-seconds 300`: bounded transcription window, preventing whole-book STFT memory exhaustion.
+- `--minutes 10`: approximate target duration for time-based parts.
+- `--mode smart`: sentence-aware timed splitting; chapter-wide output is also available through the UI.
+- `--resume`: reuse checkpoints and valid rendered audio after interruption.
+- `--transcript-cache <path>`: reuse a transcript generated elsewhere.
+- `--dry-run`: inspect the planned cuts without rendering MP3s.
+- `--skip-booksync`: produce only the legacy MP3 export.
+
+Chapter boundaries are always hard boundaries: one output MP3 never contains two chapters. Cuts receive short fades to avoid abrupt transitions.
+
+## Web application
+
+Install frontend dependencies:
 
 ```powershell
-python .\pdf_audiobook_splitter.py --pdf .\book.pdf --audio .\book.mp3 --device cuda
+cd .\frontend
+npm install
 ```
 
-For a faster NVIDIA GPU run:
-
-```powershell
-python .\pdf_audiobook_splitter.py --model medium --device cuda
-```
-
-For the upload frontend, run the local processing service alongside the
-frontend dev server:
+Run the local processing service from the repository root:
 
 ```powershell
 node .\frontend\local-server.mjs
 ```
 
-The frontend at `http://localhost:3000` sends uploaded files to the local
-service on port 3001. It returns a new ZIP for every export; it does not use a
-hard-coded book archive.
-
-To inspect the planned cuts without rendering MP3s:
+Run the frontend in another terminal:
 
 ```powershell
-python .\pdf_audiobook_splitter.py --dry-run
+cd .\frontend
+npm run dev
 ```
 
-Outputs are placed in `output/`: numbered MP3 chunks, the legacy
-`manifest.json`, the cached `transcript.json`, and a validated
-`<Book_Name>.booksync/` package. The BookSync package contains the source book,
-stable audio assets, canonical chapter HTML, sentence overlays, checksums, and
-its own versioned manifest. The audio and book cannot be synchronized from file
-metadata alone, so the Whisper alignment step is intentionally required.
+Open `http://localhost:3000`. The splitter accepts a PDF or EPUB plus an audiobook, exposes chunking and filename options, processes the uploaded files through the local service on port 3001, and downloads the actual result as a ZIP.
 
-The original command remains the compatibility entry point, while the
-implementation is divided into focused modules under `processor/`:
+The synchronized reader is available at `http://localhost:3000/reader`.
+
+## Synchronized reader
+
+Import a processed BookSync ZIP in `/reader` to:
+
+- read sanitized EPUB-derived chapter content;
+- play a continuous logical audiobook timeline across split audio assets;
+- retain the full active-sentence highlight;
+- show the current spoken word in darker green when word timings are available;
+- navigate by chapter or sentence;
+- change theme, font size, follow mode, and playback speed;
+- resume the saved chapter, sentence, position, and speed after reload.
+
+Older BookSync packages without the optional `words` overlay field continue to work with sentence-only highlighting. Reprocess an older source pair to add word highlighting.
+
+Reader imports validate schemas, exact sizes, SHA-256 checksums, paths, archive limits, timeline consistency, and word timing order before committing data atomically to IndexedDB. EPUB markup is sanitized with DOMPurify.
+
+## Output structure
+
+The selected output directory contains:
+
+- chapter-safe MP3 listening parts;
+- `manifest.json` for the legacy split export;
+- resumable transcript and processing checkpoints;
+- `<Book_Name>.booksync/`, the synchronized package directory;
+- alignment quality and review reports.
+
+The BookSync package contains:
+
+```text
+<Book_Name>.booksync/
+|-- manifest.json
+|-- checksums.json
+|-- audio/
+|-- content/
+|-- overlays/
+|-- transcript/
+|-- reports/
+`-- source/
+```
+
+User-selected filenames are presentation details. Internal stable IDs and content hashes preserve synchronization independently of export naming.
+
+## Architecture
 
 ```text
 processor/
-├── extractors/
-├── transcription/
-├── alignment/
-├── audio/
-├── packaging/
-└── cli.py
+|-- extractors/       PDF and EPUB extraction
+|-- transcription/    bounded faster-whisper transcription
+|-- alignment/        chapter and sentence alignment
+|-- audio/            FFmpeg rendering and validation
+|-- packaging/        BookSync package and quality reports
+`-- cli.py             processing orchestration
+
+frontend/
+|-- app/               splitter and synchronized reader UI
+|-- lib/booksync/      BookSync types
+|-- lib/reader/        validation, storage, and reader logic
+`-- tests/             reader hardening tests
 ```
 
-To reuse a transcript stored elsewhere:
+The package contract and roadmap are documented in [docs/booksync-package-v1.md](docs/booksync-package-v1.md), [docs/milestone-3.md](docs/milestone-3.md), [docs/milestone-3.5-p0-hardening.md](docs/milestone-3.5-p0-hardening.md), and [PLAN.md](PLAN.md).
+
+## Validation and tests
+
+Run all Python tests:
 
 ```powershell
-python .\pdf_audiobook_splitter.py --pdf .\book.epub --audio .\book.mp3 --transcript-cache .\cache\transcript.json
+conda run --no-capture-output -n animal-farm-splitter python -m unittest discover -s tests
 ```
 
-Use `--skip-booksync` when only the legacy MP3 export is wanted.
-
-Milestone 2 uses chapter-wide sequence alignment by default. It can align
-one-to-many and many-to-one sentence groups, skip source or transcript
-omissions without losing later matches, and refine sentence times back onto
-ASR word timestamps. Use `--resume` to reuse already rendered, FFprobe-valid
-audio parts after an interrupted run.
-
-Each BookSync package now includes:
-
-- `reports/quality-report.json` with chapter coverage and cut diagnostics
-- `reports/alignment-review.html` for human review of every sentence
-
-The current backend uses ASR word timestamps. Its backend interface is ready
-for a future acoustic forced aligner, but the quality report deliberately does
-not claim that acoustic forced alignment or manual timing evaluation occurred.
-
-## BookSync v1 contract
-
-The frontend includes a local synchronized reader at `/reader`. Import a BookSync ZIP to keep a private browser library, render EPUB chapters, play the logical audiobook timeline, highlight the active sentence, navigate, adjust playback and typography, and resume where you stopped. See [`docs/milestone-3.md`](docs/milestone-3.md).
-
-The reader import boundary is hardened with schema and checksum verification, bounded ZIP extraction, atomic quota-aware storage, DOMPurify EPUB sanitization, cancellation, corruption detection, and race-safe playback. See [`docs/milestone-3.5-p0-hardening.md`](docs/milestone-3.5-p0-hardening.md).
-
-Milestone 0 of the synchronized-reader roadmap defines the provider-neutral
-BookSync package contract. The versioned JSON Schemas are in `schemas/`, the
-normative package rules and architecture decisions are in `docs/`, and a
-generated, copyright-free fixture is in `examples/minimal.booksync/`.
-
-Validate the example package:
+Validate a package:
 
 ```powershell
-conda run --no-capture-output -n animal-farm-splitter python .\tools\validate_booksync_package.py .\examples\minimal.booksync
+conda run --no-capture-output -n animal-farm-splitter python .\tools\validate_booksync_package.py .\output\My_Book.booksync
 ```
 
-Run the contract tests:
+Build the frontend and run reader tests:
 
 ```powershell
-conda run --no-capture-output -n animal-farm-splitter python -m unittest tests.test_booksync_contract -v
+cd .\frontend
+npm test
 ```
 
-The processor emits BookSync v1 packages by default. See `plan.md` for the
-remaining reader and storage roadmap.
+The repository includes only source code and synthetic/copyright-free fixtures. Personal books, audiobooks, generated packages, caches, and output ZIPs must remain untracked.
