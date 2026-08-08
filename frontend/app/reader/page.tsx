@@ -117,14 +117,20 @@ export default function ReaderPage() {
   useEffect(() => {
     const root = readerRef.current;
     if (!root) return;
-    root.querySelectorAll(".booksync-active").forEach((node) => node.classList.remove("booksync-active"));
-    if (!currentSentence) return;
+    if (!currentSentence) {
+      root.querySelectorAll(".booksync-active").forEach((node) => node.classList.remove("booksync-active"));
+      highlightedSentenceId.current = undefined;
+      return;
+    }
     // Sentence IDs come from the imported package. Avoid treating them as CSS
     // selectors: getElementById handles arbitrary valid IDs without CSS.escape
     // support or selector parsing edge cases.
     const candidate = document.getElementById(currentSentence.sentence_id);
     const element = candidate && root.contains(candidate) ? candidate : null;
-    element?.classList.add("booksync-active");
+    root.querySelectorAll(".booksync-active").forEach((node) => {
+      if (node !== element) node.classList.remove("booksync-active");
+    });
+    if (element && !element.classList.contains("booksync-active")) element.classList.add("booksync-active");
     const changed = highlightedSentenceId.current !== currentSentence.sentence_id;
     highlightedSentenceId.current = currentSentence.sentence_id;
     if (changed && follow && playing) element?.scrollIntoView({ behavior: "smooth", block: "center" });
