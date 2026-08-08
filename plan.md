@@ -4,7 +4,7 @@
 
 - Status: Active roadmap
 - Implementation status: Milestones 0, 1, and 2 implemented; manual timing evaluation remains an explicit quality gate
-- Scope: Synchronized PDF/EPUB reading, audiobook playback, and remote storage
+- Scope: Synchronized PDF/EPUB reading, audiobook playback, reading-assistance modes, remote storage, and cross-platform distribution
 - Existing foundation: PDF/EPUB extraction, bounded GPU transcription, chapter-safe audio splitting, manifests, and a React processing frontend
 
 ## Product direction
@@ -27,7 +27,8 @@ The transcript is an input to synchronization, not the final synchronization mod
 6. Add Google Drive streaming.
 7. Add Telegram storage and retrieval.
 8. Add optional word-level highlighting.
-9. Add OCR, hosted deployment, and mobile packaging later.
+9. Add optional bionic reading without changing source text or synchronization IDs.
+10. Add OCR, hosted deployment, and mobile packaging later.
 
 EPUB should be the first complete reader format because its text is structured. PDF support is substantially harder because text order, coordinates, columns, scanned pages, and decorative layouts vary between documents.
 
@@ -45,6 +46,8 @@ Sentence-level highlighting should be the first synchronization target. Word-lev
 - Preserve user privacy by keeping processing local by default.
 - Degrade gracefully when narration differs from the printed book.
 - Keep package formats versioned and migratable.
+- Offer bionic reading as a reversible presentation preference compatible with sentence and word highlighting.
+- Provide a path to an installable live website and packaged Android, iOS, and desktop applications.
 
 ## Non-goals for the first release
 
@@ -56,6 +59,7 @@ Sentence-level highlighting should be the first synchronization target. Word-lev
 - Social features, comments, or shared annotations.
 - Direct, uncached Telegram playback for every file size.
 - Pixel-perfect reproduction of every EPUB publisher style.
+- Claiming medical or attention benefits from bionic reading; it is an optional visual preference, not a treatment.
 
 ## High-level architecture
 
@@ -407,11 +411,32 @@ Responsibilities:
 - Resume position
 - Light, dark, and sepia themes
 - Font, width, and spacing controls
+- Optional bionic reading with adjustable emphasis strength
 - Keyboard shortcuts
 - Alignment-quality indicator
 - Offline playback
 
 Word-level highlighting is deliberately excluded from the first reader milestone.
+
+### Bionic reading mode
+
+Bionic reading is a renderer-level preference. It must never rewrite stored canonical chapter HTML or overlay text.
+
+Requirements:
+
+- Emphasize the leading portion of eligible words while preserving the exact visible text.
+- Offer Off, Light, Medium, and Strong presets, defaulting to Off.
+- Exclude punctuation-only tokens, code, and very short words where emphasis adds noise.
+- Preserve sentence IDs, word indices, copy/paste output, search text, screen-reader text, and synchronization locators.
+- Compose with sentence and current-word highlights; the active spoken word remains the strongest visual state.
+- Avoid playback-tick DOM reconstruction and layout shifts.
+- Persist the preference per device, with per-book overrides considered later.
+- Present it as a visual preference, with no medical or attention-improvement claims.
+
+Acceptance gate:
+
+- Toggling bionic mode does not change extracted text, timing indices, reading position, selection/copy behavior, or screen-reader output.
+- Long-chapter rendering and playback remain stable when bionic mode and word highlighting are enabled together.
 
 ## Storage architecture
 
@@ -704,6 +729,36 @@ Deliverables:
 - Desktop packaging decision
 - Installation and update strategy
 
+### Milestone 9: distribution, live website, and cross-platform apps
+
+The preferred first distribution target is an installable Progressive Web App (PWA), preserving one reader codebase across desktop and mobile. Native wrappers should follow only where browser storage, background audio, filesystem access, or app-store distribution requires them.
+
+Deliverables:
+
+- Production deployment architecture for the live website
+- Installable PWA manifest, service worker, offline shell, icons, and safe update flow
+- Responsive phone, tablet, and desktop reader layouts
+- Background audio and media-session controls where supported
+- Platform file import/export and share targets where available
+- Storage-quota UX, backup guidance, and browser-eviction recovery
+- Android wrapper evaluation using Capacitor or an equivalent maintained tool
+- Signed Android APK/AAB and reproducible release process if the wrapper is selected
+- iOS packaging evaluation with documented App Store constraints
+- Desktop packaging evaluation for Windows, macOS, and Linux
+- Automated builds, versioning, release notes, and update strategy
+- Privacy policy and deployment threat model
+
+The live-site architecture must distinguish two modes:
+
+1. **Local-processing website:** the static/PWA reader runs remotely, while books, audio, transcription, and packages remain on the user's device or local gateway.
+2. **Hosted-processing service:** uploads and GPU processing use managed infrastructure and therefore require authentication, encrypted transport and storage, deletion guarantees, abuse controls, cost limits, and explicit consent.
+
+The local-processing PWA should ship first. Hosted GPU processing is a separate product and security decision, not an automatic consequence of deploying the frontend.
+
+Exit gate:
+
+- A user can install the reader on desktop and Android, import or connect to a BookSync library, play in the background where supported, work offline, and upgrade without losing books or progress.
+
 ## Testing strategy
 
 ### Fixture policy
@@ -762,6 +817,7 @@ Deliverables:
 
 - Eight-hour audiobook processing
 - Eight-hour reader session
+- Long chapters with bionic reading and word highlighting enabled together
 - Large EPUB chapter
 - Large text-based PDF
 - Slow network playback
@@ -855,6 +911,9 @@ A realistic focused-development sequence is approximately 12 to 15 weeks:
 - Library and cache: 1 week
 - Google Drive: 1 to 2 weeks
 - Telegram: 1 to 2 weeks
+- Bionic reading: less than 1 week after reader typography controls are stable
+- PWA and deployment hardening: 1 to 2 weeks
+- Android packaging and release automation: 1 to 2 weeks after the PWA exit gate
 - Hardening: ongoing, with a focused final pass
 
 Milestone exit gates should control progression. Calendar estimates must not override alignment quality.
@@ -874,6 +933,9 @@ The following decisions are recommended unless testing produces contrary evidenc
 - Separate logical chapters from transport-sized audio objects.
 - Keep the renderer, player, synchronizer, and storage provider independent.
 - Refuse low-confidence highlights rather than displaying misleading ones.
+- Implement bionic reading as reversible presentation markup, never as a mutation of canonical package text.
+- Ship an installable local-processing PWA before committing to hosted GPU processing or native wrappers.
+- Treat Android APK/AAB, iOS, and desktop packaging as distribution layers over the provider-neutral reader core.
 
 ## Reference material
 
