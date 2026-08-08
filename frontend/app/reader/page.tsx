@@ -29,12 +29,15 @@ export default function ReaderPage() {
   const audioUrl = useRef<string | undefined>(undefined);
   const activeAssetId = useRef<string | undefined>(undefined);
   const readerRef = useRef<HTMLElement>(null);
+  const highlightedSentenceId = useRef<string | undefined>(undefined);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const latestPosition = useRef<Parameters<typeof savePosition>[0] | undefined>(undefined);
   const importController = useRef<AbortController | undefined>(undefined);
   const seekGeneration = useRef(0);
   const manifest = book?.manifest;
   const chapter = manifest?.chapters[chapterIndex];
   const currentSentence = useMemo(() => activeEntry(entries, globalMs), [entries, globalMs]);
+  latestPosition.current = manifest && chapter ? { book_id: manifest.book_id, global_ms: globalMs, chapter_id: chapter.id, sentence_id: currentSentence?.sentence_id, playback_rate: rate, updated_at: new Date().toISOString() } : undefined;
 
   const refreshLibrary = useCallback(async () => setLibrary(await listLocalBooks()), []);
   useEffect(() => { let active = true; void listLocalBooks().then((books) => { if (active) setLibrary(books); }); return () => { active = false; }; }, []);
@@ -97,9 +100,10 @@ export default function ReaderPage() {
     loadPosition(manifest.book_id).then((position) => {
       if (cancelled) return;
       const target = position?.global_ms ?? 0;
+      const restoredRate = position?.playback_rate ?? 1;
       const index = manifest.chapters.findIndex((item) => target >= item.audio_start_ms && target < item.audio_end_ms);
-      setChapterIndex(Math.max(0, index)); setGlobalMs(target); setRate(position?.playback_rate ?? 1);
-      void seekGlobal(target, false);
+      setChapterIndex(Math.max(0, index)); setGlobalMs(target); setRate(restoredRate);
+      void seekGlobal(target, false).then(() => { if (audioRef.current) audioRef.current.playbackRate = restoredRate; });
     });
     return () => { cancelled = true; };
     // Resume is intentionally keyed to book identity; seekGlobal is recreated by playback state.
@@ -107,21 +111,41 @@ export default function ReaderPage() {
   }, [manifest?.book_id]);
 
   useEffect(() => {
+    if (audioRef.current) audioRef.current.playbackRate = rate;
+  }, [rate]);
+
+  useEffect(() => {
     const root = readerRef.current;
     if (!root) return;
     root.querySelectorAll(".booksync-active").forEach((node) => node.classList.remove("booksync-active"));
     if (!currentSentence) return;
-    const element = root.querySelector(`#${CSS.escape(currentSentence.sentence_id)}`);
+    // Sentence IDs come from the imported package. Avoid treating them as CSS
+    // selectors: getElementById handles arbitrary valid IDs without CSS.escape
+    // support or selector parsing edge cases.
+    const candidate = document.getElementById(currentSentence.sentence_id);
+    const element = candidate && root.contains(candidate) ? candidate : null;
     element?.classList.add("booksync-active");
-    if (follow && playing) element?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [currentSentence, follow, playing, markup]);
+    const changed = highlightedSentenceId.current !== currentSentence.sentence_id;
+    highlightedSentenceId.current = currentSentence.sentence_id;
+    if (changed && follow && playing) element?.scrollIntoView({ behavior: "smooth", block: "center" });
+    // globalMs keeps the class in place if React refreshes the innerHTML while
+    // the same sentence remains active.
+  }, [currentSentence, follow, playing, markup, globalMs]);
 
   useEffect(() => {
-    if (!manifest || !chapter) return;
+    if (!manifest || !chapter || playing) return;
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => void savePosition({ book_id: manifest.book_id, global_ms: globalMs, chapter_id: chapter.id, sentence_id: currentSentence?.sentence_id, playback_rate: rate, updated_at: new Date().toISOString() }), 700);
+    saveTimer.current = setTimeout(() => { if (latestPosition.current) void savePosition(latestPosition.current); }, 700);
     return () => clearTimeout(saveTimer.current);
-  }, [manifest, chapter, globalMs, rate, currentSentence]);
+  }, [manifest, chapter, globalMs, rate, currentSentence, playing]);
+
+  useEffect(() => {
+    if (!playing || !manifest) return;
+    const persist = () => { if (latestPosition.current) void savePosition(latestPosition.current); };
+    const interval = setInterval(persist, 2_000);
+    window.addEventListener("pagehide", persist);
+    return () => { clearInterval(interval); window.removeEventListener("pagehide", persist); persist(); };
+  }, [playing, manifest]);
 
   useEffect(() => () => { if (audioUrl.current) URL.revokeObjectURL(audioUrl.current); }, []);
 
