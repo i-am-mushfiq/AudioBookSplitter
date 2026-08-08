@@ -1,0 +1,12 @@
+name: pdf-audiobook-splitter
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - ffmpeg
+  - pip
+  - pip:
+      - pdfplumber>=0.11.0
+      - faster-whisper>=1.1.0
+      - nvidia-cublas-cu12
+      - nvidia-cudnn-cu12

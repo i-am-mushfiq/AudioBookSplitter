@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+output/
+.chapter-cut-jobs/
+frontend/*.log
+frontend/test-export.zip
+*.pyc
+*.mp3
+*.pdf
+frontend/node_modules/
+frontend/.next/
+frontend/.vinext/
+frontend/.wrangler/
+frontend/build/
+frontend/dist/
+frontend/public/*.zip
