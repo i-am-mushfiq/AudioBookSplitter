@@ -6,6 +6,7 @@ import type { BookSyncOverlay, BookSyncOverlayEntry } from "../../lib/booksync/t
 import { activeEntry, formatClock, safeChapterMarkup } from "../../lib/reader/content";
 import { deleteLocalBook, importBookSyncZip, listLocalBooks, loadPosition, readPackageFile, readPackageText, savePosition, verifyLocalBook, type ImportProgress, type LocalBookRecord } from "../../lib/reader/library";
 import "./reader.css";
+import "./highlight.css";
 
 type Theme = "paper" | "night" | "contrast";
 
@@ -37,6 +38,7 @@ export default function ReaderPage() {
   const manifest = book?.manifest;
   const chapter = manifest?.chapters[chapterIndex];
   const currentSentence = useMemo(() => activeEntry(entries, globalMs), [entries, globalMs]);
+  const renderedChapter = useMemo(() => <article ref={readerRef} className="book-content" style={{ fontSize }} dangerouslySetInnerHTML={{ __html: markup }} />, [fontSize, markup]);
   latestPosition.current = manifest && chapter ? { book_id: manifest.book_id, global_ms: globalMs, chapter_id: chapter.id, sentence_id: currentSentence?.sentence_id, playback_rate: rate, updated_at: new Date().toISOString() } : undefined;
 
   const refreshLibrary = useCallback(async () => setLibrary(await listLocalBooks()), []);
@@ -134,9 +136,7 @@ export default function ReaderPage() {
     const changed = highlightedSentenceId.current !== currentSentence.sentence_id;
     highlightedSentenceId.current = currentSentence.sentence_id;
     if (changed && follow && playing) element?.scrollIntoView({ behavior: "smooth", block: "center" });
-    // globalMs keeps the class in place if React refreshes the innerHTML while
-    // the same sentence remains active.
-  }, [currentSentence, follow, playing, markup, globalMs]);
+  }, [currentSentence, follow, playing, markup]);
 
   useEffect(() => {
     if (!manifest || !chapter || playing) return;
@@ -211,7 +211,7 @@ export default function ReaderPage() {
     <aside className="reader-library"><div className="library-title"><span>LOCAL LIBRARY</span><b>{library.length}</b></div>{library.length ? library.map((item) => <div className={`library-book ${book?.book_id === item.book_id ? "active" : ""}`} key={item.book_id}><button onClick={() => void openBook(item)}><strong>{item.manifest.title}</strong><small>{item.manifest.author || "Unknown author"} · {formatClock(item.manifest.total_duration_ms)}</small></button><button className="book-delete" title="Remove from this device" onClick={() => void removeBook(item)}>×</button></div>) : <div className="library-empty">Import a processed BookSync ZIP. It stays in this browser.</div>}</aside>
     {manifest && chapter ? <>
       <nav className="chapter-nav"><span>CHAPTERS</span>{manifest.chapters.map((item, index) => <button className={index === chapterIndex ? "active" : ""} key={item.id} onClick={() => { setChapterIndex(index); void seekGlobal(item.audio_start_ms); }}><b>{String(index + 1).padStart(2, "0")}</b><span>{item.title || item.label}</span></button>)}</nav>
-      <section className="reader-stage"><div className="reader-tools"><div><button onClick={() => setTheme("paper")} aria-label="Paper theme">☀</button><button onClick={() => setTheme("night")} aria-label="Night theme">◐</button><button onClick={() => setTheme("contrast")} aria-label="High contrast theme">◒</button></div><div><button onClick={() => setFontSize(Math.max(15, fontSize - 1))}>A−</button><span>{fontSize}</span><button onClick={() => setFontSize(Math.min(30, fontSize + 1))}>A+</button></div><label><input type="checkbox" checked={follow} onChange={(event) => setFollow(event.target.checked)} /> Follow audio</label></div><article ref={readerRef} className="book-content" style={{ fontSize }} dangerouslySetInnerHTML={{ __html: markup }} /></section>
+      <section className="reader-stage"><div className="reader-tools"><div><button onClick={() => setTheme("paper")} aria-label="Paper theme">☀</button><button onClick={() => setTheme("night")} aria-label="Night theme">◐</button><button onClick={() => setTheme("contrast")} aria-label="High contrast theme">◒</button></div><div><button onClick={() => setFontSize(Math.max(15, fontSize - 1))}>A−</button><span>{fontSize}</span><button onClick={() => setFontSize(Math.min(30, fontSize + 1))}>A+</button></div><label><input type="checkbox" checked={follow} onChange={(event) => setFollow(event.target.checked)} /> Follow audio</label></div>{renderedChapter}</section>
       <footer className="player"><div className="now-reading"><small>{chapter.title || chapter.label}</small><strong>{currentSentence?.text ?? "Ready to listen"}</strong></div><div className="transport"><div><button onClick={() => chapterStep(-1)} title="Previous chapter">|‹</button><button onClick={() => sentenceStep(-1)} title="Previous sentence">‹</button><button className="play" onClick={() => playing ? audioRef.current?.pause() : void seekGlobal(globalMs, true)}>{playing ? "Ⅱ" : "▶"}</button><button onClick={() => sentenceStep(1)} title="Next sentence">›</button><button onClick={() => chapterStep(1)} title="Next chapter">›|</button></div><label><span>{formatClock(globalMs)}</span><input type="range" min="0" max={manifest.total_duration_ms} step="1000" value={globalMs} onChange={(event) => { audioRef.current?.pause(); void seekGlobal(Number(event.target.value), false); }} onMouseUp={() => playing && void audioRef.current?.play()} /><span>{formatClock(manifest.total_duration_ms)}</span></label></div><select value={rate} onChange={(event) => { const next = Number(event.target.value); setRate(next); if (audioRef.current) audioRef.current.playbackRate = next; }}>{[0.75, 1, 1.25, 1.5, 1.75, 2].map((value) => <option key={value} value={value}>{value}×</option>)}</select></footer>
     </> : <section className="reader-welcome"><span>LOCAL · PRIVATE · SYNCHRONIZED</span><h1>Read with<br />the narrator.</h1><p>Import a validated BookSync ZIP to read the EPUB, hear the audiobook, and follow each sentence as it is spoken.</p>{importing ? <button className="welcome-import reader-cancel" onClick={() => importController.current?.abort()}>{importLabel} · Cancel</button> : <label className="welcome-import">Choose a BookSync ZIP<input type="file" accept=".zip,application/zip" onChange={(event) => event.target.files?.[0] && void importPackage(event.target.files[0])} /></label>}<small className="storage-state">{storagePersistent ? "Offline storage is protected from automatic eviction." : "Your browser may reclaim local books when storage is low."}</small>{error && <p className="reader-error">{error}</p>}</section>}
     {error && manifest && <div className="reader-toast">{error}</div>}
