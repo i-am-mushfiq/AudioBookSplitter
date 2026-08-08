@@ -5,11 +5,26 @@ from pathlib import Path
 
 
 WORD_RE = re.compile(r"[a-z0-9]+(?:'[a-z0-9]+)?")
-SENTENCE_RE = re.compile(r"(?<=[.!?])(?:[\"'”’)]*)\s+(?=[A-Z0-9\"'“‘(])")
+BOUNDARY_RE = re.compile(r"[.!?][\"'”’)]*(?P<space>\s+)(?=[\"'“‘(]*[A-Z0-9])")
+ABBREVIATION_RE = re.compile(
+    r"\b(Mr|Mrs|Ms|Dr|Prof|Rev|St|Sr|Jr|Gen|Col|Capt|Sgt|Lt|No|vs|etc|e\.g|i\.e)\.",
+    re.I,
+)
+PERIOD_MARKER = "\uE000"
+NUMBER_WORDS = {
+    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+    "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+    "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13",
+    "fourteen": "14", "fifteen": "15", "sixteen": "16", "seventeen": "17",
+    "eighteen": "18", "nineteen": "19", "twenty": "20",
+    "first": "1", "second": "2", "third": "3", "fourth": "4", "fifth": "5",
+    "sixth": "6", "seventh": "7", "eighth": "8", "ninth": "9", "tenth": "10",
+}
 
 
 def norm(text: str) -> list[str]:
-    return WORD_RE.findall(text.lower().replace("—", " ").replace("-", " "))
+    tokens = WORD_RE.findall(text.lower().replace("—", " ").replace("-", " "))
+    return [NUMBER_WORDS.get(token, token) for token in tokens]
 
 
 def roman_to_int(value: str) -> int:
@@ -45,5 +60,26 @@ def split_sentences(paragraph: str) -> list[str]:
     cleaned = " ".join(paragraph.split())
     if not cleaned:
         return []
-    sentences = [item.strip() for item in SENTENCE_RE.split(cleaned) if item.strip()]
-    return sentences or [cleaned]
+    protected = ABBREVIATION_RE.sub(lambda match: match.group(0).replace(".", PERIOD_MARKER), cleaned)
+    protected = re.sub(r"\b([A-Z])\.(?=\s+[A-Z])", lambda match: match.group(0).replace(".", PERIOD_MARKER), protected)
+    protected = re.sub(r"(?<=\d)\.(?=\d)", PERIOD_MARKER, protected)
+
+    sentences: list[str] = []
+    start = 0
+    for boundary in BOUNDARY_RE.finditer(protected):
+        split_at = boundary.start("space")
+        sentence = protected[start:split_at].strip().replace(PERIOD_MARKER, ".")
+        if sentence:
+            sentences.append(sentence)
+        start = boundary.end("space")
+    tail = protected[start:].strip().replace(PERIOD_MARKER, ".")
+    if tail:
+        sentences.append(tail)
+
+    merged: list[str] = []
+    for sentence in sentences:
+        if merged and not norm(sentence):
+            merged[-1] = f"{merged[-1]} {sentence}".strip()
+        else:
+            merged.append(sentence)
+    return merged or [cleaned]

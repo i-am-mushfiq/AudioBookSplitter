@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import difflib
+import math
 import re
 
 from processor.models import ChapterRange, Cut, ExtractedBook, ProcessingPlan, Word
@@ -43,7 +44,16 @@ def nearest_sentence_cut(words: list[Word], target: float, window: float = 75.0)
             candidates.append((abs(word.end - target), word.end))
     if candidates:
         return min(candidates)[1], "nearest sentence end"
-    return target, "time target (no sentence match)"
+    pauses: list[tuple[float, float]] = []
+    for current, following in zip(words, words[1:]):
+        if abs(current.end - target) <= window and following.start - current.end >= 0.35:
+            pauses.append((abs(current.end - target), current.end))
+    if pauses:
+        return min(pauses)[1], "nearest speech pause"
+    boundaries = [(abs(word.end - target), word.end) for word in words if abs(word.end - target) <= window]
+    if boundaries:
+        return min(boundaries)[1], "nearest word boundary"
+    return target, "time target (no speech metadata)"
 
 
 def build_processing_plan(
@@ -91,11 +101,28 @@ def build_processing_plan(
     target = minutes * 60
     chunk_number = 1
     for chapter_range in chapter_ranges:
+        chapter_duration = chapter_range.end - chapter_range.start
+        desired_boundaries: list[float] = []
+        if mode == "smart" and chapter_duration > target + 45:
+            part_count = math.ceil(chapter_duration / target)
+            desired_boundaries = [
+                chapter_range.start + chapter_duration * part / part_count
+                for part in range(1, part_count)
+            ]
+        elif mode == "fixed":
+            next_target = chapter_range.start + target
+            while chapter_range.end - next_target > 45:
+                desired_boundaries.append(next_target)
+                next_target += target
+
         current = chapter_range.start
         part = 1
-        while mode != "chapter" and chapter_range.end - current > target + 45:
-            cut, reason = nearest_sentence_cut(words, current + target)
-            cut = max(current + 60, min(chapter_range.end - 30, cut))
+        for boundary_index, desired in enumerate(desired_boundaries, 1):
+            cut, reason = nearest_sentence_cut(words, desired)
+            remaining_parts = len(desired_boundaries) - boundary_index + 1
+            minimum = current + 60
+            maximum = chapter_range.end - remaining_parts * 60
+            cut = max(minimum, min(maximum, cut))
             cuts.append(
                 Cut(
                     chunk_number,

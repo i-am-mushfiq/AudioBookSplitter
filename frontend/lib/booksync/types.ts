@@ -95,6 +95,8 @@ export interface BookSyncManifestV1 {
   audio_assets: BookSyncAudioAsset[];
   overlay_assets: BookSyncOverlayAsset[];
   transcript?: PackageFileAsset;
+  quality_report?: PackageFileAsset;
+  alignment_review?: PackageFileAsset;
   alignment: AlignmentSummary;
   created_at: string;
   generator: BookSyncGenerator;

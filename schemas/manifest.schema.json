@@ -50,6 +50,8 @@
       "items": { "$ref": "#/$defs/overlayAsset" }
     },
     "transcript": { "$ref": "#/$defs/fileAsset" },
+    "quality_report": { "$ref": "#/$defs/fileAsset" },
+    "alignment_review": { "$ref": "#/$defs/fileAsset" },
     "alignment": { "$ref": "#/$defs/alignmentSummary" },
     "created_at": { "type": "string", "format": "date-time" },
     "generator": { "$ref": "#/$defs/generator" }

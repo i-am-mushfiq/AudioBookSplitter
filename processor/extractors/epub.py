@@ -12,6 +12,7 @@ from processor.models import Chapter, ExtractedBook
 
 BLOCK_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "blockquote"}
 SKIP_TAGS = {"script", "style", "nav", "svg"}
+END_MARKERS = {"the end", "end of the project gutenberg ebook"}
 
 
 class EpubTextParser(HTMLParser):
@@ -91,6 +92,16 @@ def _metadata_text(opf: ElementTree.Element, name: str) -> str | None:
     return value or None
 
 
+def clean_paragraphs(paragraphs: list[str]) -> list[str]:
+    cleaned: list[str] = []
+    for paragraph in paragraphs:
+        marker = " ".join(paragraph.lower().split()).strip(" .—-*_")
+        if marker in END_MARKERS or marker.startswith("*** end of"):
+            break
+        cleaned.append(paragraph)
+    return cleaned
+
+
 def extract_epub(epub_path: Path) -> ExtractedBook:
     """Read EPUB spine documents in publication order."""
     with zipfile.ZipFile(epub_path) as archive:
@@ -125,11 +136,12 @@ def extract_epub(epub_path: Path) -> ExtractedBook:
             parser = EpubTextParser()
             parser.feed(source)
             parser.close()
-            text = parser.text
+            paragraphs = clean_paragraphs(parser.paragraphs)
+            text = " ".join(paragraphs).strip() or parser.text
             if not text:
                 continue
             chapter_title = (parser.heading or parser.title or f"Section {spine_index}").strip()
-            paragraphs = parser.paragraphs or [text]
+            paragraphs = paragraphs or [text]
             sections.append(text)
             chapters.append(
                 Chapter(

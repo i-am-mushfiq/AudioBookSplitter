@@ -120,6 +120,20 @@ def referenced_assets(manifest: dict[str, Any]) -> dict[str, tuple[str, int, str
             transcript["byte_length"],
             "manifest.transcript",
         )
+    quality_report = manifest.get("quality_report")
+    if quality_report:
+        assets[quality_report["path"]] = (
+            quality_report["sha256"],
+            quality_report["byte_length"],
+            "manifest.quality_report",
+        )
+    alignment_review = manifest.get("alignment_review")
+    if alignment_review:
+        assets[alignment_review["path"]] = (
+            alignment_review["sha256"],
+            alignment_review["byte_length"],
+            "manifest.alignment_review",
+        )
     for index, chapter in enumerate(manifest["chapters"]):
         assets[chapter["content_path"]] = (
             chapter["content_sha256"],

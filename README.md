@@ -106,6 +106,21 @@ python .\pdf_audiobook_splitter.py --pdf .\book.epub --audio .\book.mp3 --transc
 
 Use `--skip-booksync` when only the legacy MP3 export is wanted.
 
+Milestone 2 uses chapter-wide sequence alignment by default. It can align
+one-to-many and many-to-one sentence groups, skip source or transcript
+omissions without losing later matches, and refine sentence times back onto
+ASR word timestamps. Use `--resume` to reuse already rendered, FFprobe-valid
+audio parts after an interrupted run.
+
+Each BookSync package now includes:
+
+- `reports/quality-report.json` with chapter coverage and cut diagnostics
+- `reports/alignment-review.html` for human review of every sentence
+
+The current backend uses ASR word timestamps. Its backend interface is ready
+for a future acoustic forced aligner, but the quality report deliberately does
+not claim that acoustic forced alignment or manual timing evaluation occurred.
+
 ## BookSync v1 contract
 
 Milestone 0 of the synchronized-reader roadmap defines the provider-neutral

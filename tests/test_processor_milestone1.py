@@ -6,10 +6,12 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from processor.alignment.planning import select_narrated_chapters
+from processor.alignment.backends import TranscriptSequenceAlignmentBackend
+from processor.alignment.planning import build_processing_plan, select_narrated_chapters
 from processor.extractors import extract_book
 from processor.models import Chapter, ChapterRange, Cut, ExtractedBook, ProcessingPlan, Word
 from processor.packaging import build_booksync_package
+from processor.text import norm, split_sentences
 from tools.validate_booksync_package import validate_package
 
 
@@ -29,6 +31,7 @@ class MilestoneOneProcessorTests(unittest.TestCase):
                 book.chapters[0].paragraphs,
                 ["Chapter One", "First sentence. Second sentence!"],
             )
+            self.assertNotIn("promotional", book.chapters[1].text)
 
     def test_repeated_chapter_headings_exclude_front_matter(self) -> None:
         book = ExtractedBook(
@@ -97,6 +100,7 @@ class MilestoneOneProcessorTests(unittest.TestCase):
                 "mode": "smart",
                 "minutes": 10,
                 "naming_template": "{B}.mp3",
+                "alignment_backend": TranscriptSequenceAlignmentBackend(),
             }
             package = build_booksync_package(**builder_arguments)
             rebuilt_package = build_booksync_package(**builder_arguments)
@@ -107,6 +111,53 @@ class MilestoneOneProcessorTests(unittest.TestCase):
             self.assertEqual(manifest["alignment"]["sentence_coverage"], 1.0)
             self.assertEqual(manifest["chapters"][0]["id"], "ch_0001")
             self.assertTrue((package / "content" / "chapter-0001.html").is_file())
+
+    def test_sentence_segmentation_preserves_abbreviations_and_dialogue(self) -> None:
+        paragraph = 'Mr. Jones left. "Mollie!" she cried. It was late.'
+        self.assertEqual(
+            split_sentences(paragraph),
+            ["Mr. Jones left.", '"Mollie!" she cried.', "It was late."],
+        )
+
+    def test_number_words_and_digits_share_canonical_tokens(self) -> None:
+        self.assertEqual(norm("Chapter Four"), norm("Chapter 4"))
+
+    def test_sequence_alignment_skips_omission_without_losing_later_repetition(self) -> None:
+        source_texts = [
+            "I do not believe that.",
+            "Snowball fought bravely at the Battle of the Cowshed.",
+            "But Boxer was still a little uneasy.",
+            "I do not believe that Snowball was a traitor at the beginning.",
+            "What he has done since is different.",
+        ]
+        transcript_texts = [source_texts[0], source_texts[2], source_texts[3], source_texts[4]]
+        sentences = [
+            type("Sentence", (), {"sentence_id": f"sent_{index}", "ordinal": index, "text": text})()
+            for index, text in enumerate(source_texts, 1)
+        ]
+        words: list[Word] = []
+        clock = 0.0
+        for sentence in transcript_texts:
+            tokens = sentence.split()
+            for token in tokens:
+                words.append(Word(token, clock, clock + 0.1))
+                clock += 0.1
+        aligned = TranscriptSequenceAlignmentBackend().align(sentences, words, 0.0, clock + 0.1)
+        self.assertEqual(aligned[1].state, "unmatched")
+        self.assertNotEqual(aligned[3].state, "unmatched")
+        self.assertGreater(aligned[3].start or 0, aligned[0].start or 0)
+        starts = [item.start for item in aligned if item.start is not None]
+        self.assertEqual(starts, sorted(starts))
+
+    def test_smart_cutting_balances_short_chapter_remainders(self) -> None:
+        chapter_text = " ".join(f"Sentence {index}." for index in range(1, 13))
+        chapter = Chapter("1", "Chapter One", 1, chapter_text, paragraphs=[chapter_text])
+        book = ExtractedBook("epub", [chapter_text], [chapter], "Synthetic", None)
+        words = [Word(f"sentence{index}.", index * 60.0, index * 60.0 + 0.2) for index in range(12)]
+        plan = build_processing_plan(book, words, "Synthetic", 701.0, 10.0, "smart")
+        durations = [cut.end - cut.start for cut in plan.cuts]
+        self.assertEqual(len(durations), 2)
+        self.assertGreater(min(durations), 300)
 
     @staticmethod
     def _write_minimal_epub(path: Path) -> None:
@@ -128,7 +179,7 @@ class MilestoneOneProcessorTests(unittest.TestCase):
         chapter_one = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>One</title></head>
 <body><h1>Chapter One</h1><p>First sentence. Second sentence!</p></body></html>"""
         chapter_two = """<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Two</title></head>
-<body><h1>Chapter Two</h1><p>Third sentence.</p></body></html>"""
+<body><h1>Chapter Two</h1><p>Third sentence.</p><p>THE END</p><p>promotional download site</p></body></html>"""
         with zipfile.ZipFile(path, "w") as archive:
             archive.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
             archive.writestr("META-INF/container.xml", container)

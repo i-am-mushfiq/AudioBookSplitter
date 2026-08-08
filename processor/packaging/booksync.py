@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import bisect
-import difflib
 import hashlib
 import html
 import json
@@ -13,8 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from processor import __version__
+from processor.alignment.backends import AlignmentBackend, SentenceAlignment
 from processor.models import Chapter, ChapterRange, Cut, ExtractedBook, ProcessingPlan, Word
-from processor.text import norm, split_sentences
+from processor.packaging.quality import build_quality_report, write_alignment_review
+from processor.text import split_sentences
 
 
 EXACT_MIN = 0.85
@@ -29,78 +29,6 @@ class CanonicalSentence:
     paragraph_index: int
     character_start: int
     character_end: int
-
-
-@dataclass(frozen=True)
-class SentenceMatch:
-    start: float | None
-    end: float | None
-    confidence: float
-    state: str
-    next_word_index: int
-
-
-class TranscriptMatcher:
-    def __init__(self, words: list[Word]) -> None:
-        self.words = words
-        self.word_starts = [word.start for word in words]
-        self.tokens: list[str] = []
-        self.token_word_indexes: list[int] = []
-        self.positions: dict[str, list[int]] = {}
-        for word_index, word in enumerate(words):
-            for token in norm(word.text):
-                token_index = len(self.tokens)
-                self.tokens.append(token)
-                self.token_word_indexes.append(word_index)
-                self.positions.setdefault(token, []).append(token_index)
-
-    def word_index_at(self, seconds: float) -> int:
-        return bisect.bisect_left(self.word_starts, seconds)
-
-    def token_index_for_word(self, word_index: int) -> int:
-        return bisect.bisect_left(self.token_word_indexes, word_index)
-
-    def match(
-        self,
-        sentence: str,
-        cursor_word_index: int,
-        chapter_end_word_index: int,
-    ) -> SentenceMatch:
-        target = norm(sentence)
-        if len(target) < 2:
-            return SentenceMatch(None, None, 0.0, "unmatched", cursor_word_index)
-
-        token_start = self.token_index_for_word(cursor_word_index)
-        token_end = self.token_index_for_word(chapter_end_word_index)
-        candidates = self.positions.get(target[0], [])
-        left = bisect.bisect_left(candidates, token_start)
-        right = bisect.bisect_left(candidates, token_end)
-        best: tuple[float, int] | None = None
-        for candidate_index in candidates[left:right]:
-            candidate = self.tokens[candidate_index : min(token_end, candidate_index + len(target))]
-            if len(candidate) < max(2, len(target) // 2):
-                continue
-            score = difflib.SequenceMatcher(None, target, candidate, autojunk=False).ratio()
-            if best is None or score > best[0]:
-                best = (score, candidate_index)
-                if score >= 0.995:
-                    break
-
-        if best is None or best[0] < APPROXIMATE_MIN:
-            return SentenceMatch(None, None, round(best[0], 4) if best else 0.0, "unmatched", cursor_word_index)
-
-        score, token_index = best
-        first_word_index = self.token_word_indexes[token_index]
-        final_token_index = min(len(self.token_word_indexes) - 1, token_index + len(target) - 1)
-        final_word_index = self.token_word_indexes[final_token_index]
-        state = "exact" if score >= EXACT_MIN else "approximate"
-        return SentenceMatch(
-            self.words[first_word_index].start,
-            self.words[final_word_index].end,
-            round(score, 4),
-            state,
-            final_word_index + 1,
-        )
 
 
 def sha256_file(path: Path) -> str:
@@ -214,7 +142,7 @@ def cut_for_time(cuts: list[Cut], seconds: float) -> Cut | None:
     return None
 
 
-def audio_locator(match: SentenceMatch, cuts: list[Cut]) -> dict[str, Any] | None:
+def audio_locator(match: SentenceAlignment, cuts: list[Cut]) -> dict[str, Any] | None:
     if match.start is None or match.end is None:
         return None
     cut = cut_for_time(cuts, match.start)
@@ -239,18 +167,22 @@ def build_overlay_entries(
     chapter_index: int,
     content_path: str,
     canonical: list[list[CanonicalSentence]],
-    matcher: TranscriptMatcher,
+    words: list[Word],
+    alignment_backend: AlignmentBackend,
     cuts: list[Cut],
 ) -> list[dict[str, Any]]:
-    cursor_word = matcher.word_index_at(chapter_range.start)
-    chapter_end_word = matcher.word_index_at(chapter_range.end)
+    flat_sentences = [sentence for paragraph in canonical for sentence in paragraph]
+    alignments = alignment_backend.align(
+        flat_sentences,
+        words,
+        chapter_range.start,
+        chapter_range.end,
+    )
+    alignment_by_id = {alignment.sentence_id: alignment for alignment in alignments}
     entries: list[dict[str, Any]] = []
-    chapter_character_offset = 0
     for paragraph in canonical:
         for sentence in paragraph:
-            match = matcher.match(sentence.text, cursor_word, chapter_end_word)
-            if match.state != "unmatched":
-                cursor_word = match.next_word_index
+            match = alignment_by_id[sentence.sentence_id]
             locator: dict[str, Any]
             if source_type == "epub":
                 locator = {
@@ -270,7 +202,7 @@ def build_overlay_entries(
                         }
                     ],
                 }
-            reasons = ["initial-transcript-alignment"]
+            reasons = list(match.reasons)
             if source_type == "pdf":
                 reasons.append("provisional-pdf-text-locator")
             entries.append(
@@ -285,7 +217,6 @@ def build_overlay_entries(
                     "reasons": reasons,
                 }
             )
-            chapter_character_offset = sentence.character_end + 1
     return entries
 
 
@@ -303,6 +234,7 @@ def build_booksync_package(
     mode: str,
     minutes: float,
     naming_template: str,
+    alignment_backend: AlignmentBackend,
 ) -> Path:
     source_hash = sha256_file(book_path)
     audiobook_hash = sha256_file(audio_path)
@@ -338,10 +270,10 @@ def build_booksync_package(
             }
         )
 
-    matcher = TranscriptMatcher(words)
     chapters: list[dict[str, Any]] = []
     overlay_assets: list[dict[str, Any]] = []
     all_entries: list[dict[str, Any]] = []
+    chapter_entry_groups: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
     for chapter_index, chapter_range in enumerate(plan.chapter_ranges, 1):
         chapter_id = f"ch_{chapter_index:04d}"
         overlay_id = f"ov_{chapter_index:04d}"
@@ -357,7 +289,8 @@ def build_booksync_package(
             chapter_index,
             content_path,
             canonical,
-            matcher,
+            words,
+            alignment_backend,
             plan.cuts,
         )
         all_entries.extend(entries)
@@ -374,20 +307,20 @@ def build_booksync_package(
             },
         )
         checksum_paths.append(overlay_file)
-        chapters.append(
-            {
-                "id": chapter_id,
-                "index": chapter_index,
-                "label": chapter_range.chapter.number,
-                "title": chapter_range.chapter.title or None,
-                "content_path": content_path,
-                "content_sha256": sha256_file(content_file),
-                "content_byte_length": content_file.stat().st_size,
-                "overlay_id": overlay_id,
-                "audio_start_ms": round(chapter_range.start * 1000),
-                "audio_end_ms": round(chapter_range.end * 1000),
-            }
-        )
+        chapter_record = {
+            "id": chapter_id,
+            "index": chapter_index,
+            "label": chapter_range.chapter.number,
+            "title": chapter_range.chapter.title or None,
+            "content_path": content_path,
+            "content_sha256": sha256_file(content_file),
+            "content_byte_length": content_file.stat().st_size,
+            "overlay_id": overlay_id,
+            "audio_start_ms": round(chapter_range.start * 1000),
+            "audio_end_ms": round(chapter_range.end * 1000),
+        }
+        chapters.append(chapter_record)
+        chapter_entry_groups.append((chapter_record, entries))
         overlay_assets.append(
             {
                 "id": overlay_id,
@@ -405,13 +338,28 @@ def build_booksync_package(
     aligned_count = exact_count + approximate_count
     sentence_count = len(all_entries)
 
+    display_title = book.title or book_name.replace("_", " ")
+    quality_file = package_root / "reports" / "quality-report.json"
+    write_json(
+        quality_file,
+        build_quality_report(
+            title=display_title,
+            backend_name=alignment_backend.name,
+            chapter_entries=chapter_entry_groups,
+            plan=plan,
+        ),
+    )
+    review_file = package_root / "reports" / "alignment-review.html"
+    write_alignment_review(review_file, display_title, chapter_entry_groups)
+    checksum_paths.extend([quality_file, review_file])
+
     source_record = file_record(package_root, source_destination)
     transcript_record = file_record(package_root, transcript_destination)
     manifest = {
         "format": "booksync",
         "schema_version": 1,
         "book_id": book_id,
-        "title": book.title or book_name.replace("_", " "),
+        "title": display_title,
         "author": book.author,
         "language": language,
         "source": {
@@ -429,6 +377,14 @@ def build_booksync_package(
         "transcript": {
             **transcript_record,
             "media_type": "application/json",
+        },
+        "quality_report": {
+            **file_record(package_root, quality_file),
+            "media_type": "application/json",
+        },
+        "alignment_review": {
+            **file_record(package_root, review_file),
+            "media_type": "text/html",
         },
         "alignment": {
             "sentence_count": sentence_count,
@@ -450,7 +406,7 @@ def build_booksync_package(
                 "mode": mode,
                 "minutes": minutes,
                 "naming_template": naming_template,
-                "alignment_stage": "initial-transcript-alignment",
+                "alignment_stage": alignment_backend.name,
             },
         },
     }

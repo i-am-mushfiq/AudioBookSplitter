@@ -3,7 +3,7 @@
 ## Document status
 
 - Status: Active roadmap
-- Implementation status: Milestones 0 and 1 implemented; Milestone 2 not started
+- Implementation status: Milestones 0, 1, and 2 implemented; manual timing evaluation remains an explicit quality gate
 - Scope: Synchronized PDF/EPUB reading, audiobook playback, and remote storage
 - Existing foundation: PDF/EPUB extraction, bounded GPU transcription, chapter-safe audio splitting, manifests, and a React processing frontend
 
@@ -574,7 +574,7 @@ Exit gate:
 
 - A PDF or EPUB plus audiobook produces a valid BookSync package without regressing current exports.
 
-### Milestone 2: alignment engine v2
+### Milestone 2: alignment engine v2 — implemented
 
 Deliverables:
 
