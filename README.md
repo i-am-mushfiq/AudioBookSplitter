@@ -111,11 +111,13 @@ Import a processed BookSync ZIP in `/reader` to:
 - show the current spoken word in darker green when word timings are available;
 - navigate by chapter or sentence;
 - change theme, font size, follow mode, and playback speed;
-- resume the saved chapter, sentence, position, and speed after reload.
+- reopen the last book automatically, with its saved chapter, sentence, position, and speed;
+- retain an offline local library across relaunches, with visible whole-book and chapter completion progress;
+- use larger touch controls, a mobile library drawer, and a persistent audio progress scrubber on iPhone.
 
 Older BookSync packages without the optional `words` overlay field continue to work with sentence-only highlighting. Reprocess an older source pair to add word highlighting.
 
-Reader imports validate schemas, exact sizes, SHA-256 checksums, paths, archive limits, timeline consistency, and word timing order before committing data atomically to IndexedDB. EPUB markup is sanitized with DOMPurify.
+Reader imports validate schemas, exact sizes, SHA-256 checksums, paths, archive limits, timeline consistency, and word timing order before committing data atomically to IndexedDB. EPUB markup is sanitized with DOMPurify. Database upgrades preserve existing local books rather than rebuilding their storage.
 
 ## Mobile targets
 
@@ -127,6 +129,8 @@ npm run mobile:sync
 ```
 
 Android debug APK builds with `npm run android:apk` after installing JDK 17 and the Android SDK. iPhone IPA export requires macOS, Xcode, and an Apple Developer signing team; see [`frontend/ios/README.md`](frontend/ios/README.md).
+
+When either iPhone workflow is manually dispatched with **Publish release** enabled, it creates a numbered GitHub Release asset for direct `.ipa` download (for example, `BookSync-Reader-v0.1.0-development-r12.ipa`). GitHub Actions artifacts remain as a 14-day fallback, but GitHub always wraps artifact downloads in a ZIP. The unsigned workflow's direct IPA proves compilation only; it still cannot install on a device without Apple signing.
 
 ## Output structure
 

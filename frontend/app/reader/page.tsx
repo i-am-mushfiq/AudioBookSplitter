@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BookSyncOverlay, BookSyncOverlayEntry } from "../../lib/booksync/types";
 import { activeEntry, activeWordIndex, formatClock, safeChapterMarkup } from "../../lib/reader/content";
-import { deleteLocalBook, importBookSyncZip, listLocalBooks, loadPosition, readPackageFile, readPackageText, savePosition, verifyLocalBook, type ImportProgress, type LocalBookRecord } from "../../lib/reader/library";
+import { deleteLocalBook, importBookSyncZip, listLocalBooks, listPositions, loadLastOpenedBookId, loadPosition, readPackageFile, readPackageText, saveLastOpenedBookId, savePosition, verifyLocalBook, type ImportProgress, type LocalBookRecord, type ReaderPosition } from "../../lib/reader/library";
 import "./reader.css";
 import "./highlight.css";
+import "./reader-progress.css";
 
 type Theme = "paper" | "night" | "contrast";
 
@@ -18,6 +19,10 @@ export default function ReaderPage() {
   const [globalMs, setGlobalMs] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
+  const [furthestGlobalMs, setFurthestGlobalMs] = useState(0);
+  const [completedChapterIds, setCompletedChapterIds] = useState<string[]>([]);
+  const [positions, setPositions] = useState<Record<string, ReaderPosition>>({});
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [follow, setFollow] = useState(true);
   const [theme, setTheme] = useState<Theme>("paper");
   const [fontSize, setFontSize] = useState(20);
@@ -38,11 +43,39 @@ export default function ReaderPage() {
   const chapter = manifest?.chapters[chapterIndex];
   const currentSentence = useMemo(() => activeEntry(entries, globalMs), [entries, globalMs]);
   const renderedChapter = useMemo(() => <article ref={readerRef} className="book-content" style={{ fontSize }} dangerouslySetInnerHTML={{ __html: markup }} />, [fontSize, markup]);
-  latestPosition.current = manifest && chapter ? { book_id: manifest.book_id, global_ms: globalMs, chapter_id: chapter.id, sentence_id: currentSentence?.sentence_id, playback_rate: rate, updated_at: new Date().toISOString() } : undefined;
+  latestPosition.current = manifest && chapter ? {
+    book_id: manifest.book_id,
+    global_ms: globalMs,
+    chapter_id: chapter.id,
+    sentence_id: currentSentence?.sentence_id,
+    playback_rate: rate,
+    furthest_global_ms: furthestGlobalMs,
+    completed_chapter_ids: completedChapterIds,
+    completed_at: completedChapterIds.length === manifest.chapters.length ? new Date().toISOString() : undefined,
+    updated_at: new Date().toISOString(),
+  } : undefined;
 
-  const refreshLibrary = useCallback(async () => setLibrary(await listLocalBooks()), []);
-  useEffect(() => { let active = true; void listLocalBooks().then((books) => { if (active) setLibrary(books); }); return () => { active = false; }; }, []);
-  useEffect(() => { void navigator.storage?.persisted?.().then(setStoragePersistent); }, []);
+  const refreshLibrary = useCallback(async () => {
+    const [books, savedPositions] = await Promise.all([listLocalBooks(), listPositions()]);
+    setLibrary(books);
+    setPositions(Object.fromEntries(savedPositions.map((position) => [position.book_id, position])));
+    return books;
+  }, []);
+  useEffect(() => {
+    let active = true;
+    void refreshLibrary().then(async (books) => {
+      const lastBookId = await loadLastOpenedBookId();
+      const savedBook = books.find((item) => item.book_id === lastBookId);
+      if (active && savedBook) await openBook(savedBook);
+    });
+    return () => { active = false; };
+    // Initial restore is deliberately run once. openBook only updates local reader state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshLibrary]);
+  useEffect(() => {
+    void navigator.storage?.persist?.().then(setStoragePersistent).catch(() => undefined);
+    void navigator.storage?.persisted?.().then(setStoragePersistent);
+  }, []);
 
   const setLogicalTime = useCallback((milliseconds: number) => {
     setGlobalMs(milliseconds);
@@ -104,6 +137,8 @@ export default function ReaderPage() {
       const restoredRate = position?.playback_rate ?? 1;
       const index = manifest.chapters.findIndex((item) => target >= item.audio_start_ms && target < item.audio_end_ms);
       setChapterIndex(Math.max(0, index)); setGlobalMs(target); setRate(restoredRate);
+      setFurthestGlobalMs(position?.furthest_global_ms ?? target);
+      setCompletedChapterIds(position?.completed_chapter_ids ?? []);
       void seekGlobal(target, false).then(() => { if (audioRef.current) audioRef.current.playbackRate = restoredRate; });
     });
     return () => { cancelled = true; };
@@ -114,6 +149,15 @@ export default function ReaderPage() {
   useEffect(() => {
     if (audioRef.current) audioRef.current.playbackRate = rate;
   }, [rate]);
+
+  useEffect(() => {
+    if (!chapter) return;
+    setFurthestGlobalMs((current) => Math.max(current, globalMs));
+    const chapterDuration = chapter.audio_end_ms - chapter.audio_start_ms;
+    if (globalMs >= chapter.audio_start_ms + chapterDuration * 0.9) {
+      setCompletedChapterIds((current) => current.includes(chapter.id) ? current : [...current, chapter.id]);
+    }
+  }, [chapter, globalMs]);
 
   useEffect(() => {
     const root = readerRef.current;
@@ -169,13 +213,21 @@ export default function ReaderPage() {
   useEffect(() => {
     if (!manifest || !chapter || playing) return;
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => { if (latestPosition.current) void savePosition(latestPosition.current); }, 700);
+    saveTimer.current = setTimeout(() => {
+      const position = latestPosition.current;
+      if (!position) return;
+      void savePosition(position).then(() => setPositions((current) => ({ ...current, [position.book_id]: position })));
+    }, 700);
     return () => clearTimeout(saveTimer.current);
   }, [manifest, chapter, globalMs, rate, currentSentence, playing]);
 
   useEffect(() => {
     if (!playing || !manifest) return;
-    const persist = () => { if (latestPosition.current) void savePosition(latestPosition.current); };
+    const persist = () => {
+      const position = latestPosition.current;
+      if (!position) return;
+      void savePosition(position).then(() => setPositions((current) => ({ ...current, [position.book_id]: position })));
+    };
     const interval = setInterval(persist, 2_000);
     window.addEventListener("pagehide", persist);
     return () => { clearInterval(interval); window.removeEventListener("pagehide", persist); persist(); };
@@ -185,7 +237,11 @@ export default function ReaderPage() {
 
   async function openBook(record: LocalBookRecord) {
     setError("");
-    try { await verifyLocalBook(record); setBook(record); setMarkup(""); setEntries([]); }
+    try {
+      await verifyLocalBook(record);
+      setBook(record); setMarkup(""); setEntries([]); setLibraryOpen(false);
+      await saveLastOpenedBookId(record.book_id);
+    }
     catch (caught) { setError(caught instanceof Error ? caught.message : "The local package is incomplete."); }
   }
 
@@ -204,7 +260,10 @@ export default function ReaderPage() {
 
   async function removeBook(record: LocalBookRecord) {
     await deleteLocalBook(record.book_id);
-    if (book?.book_id === record.book_id) { setBook(undefined); setPlaying(false); audioRef.current?.pause(); }
+    if (book?.book_id === record.book_id) {
+      setBook(undefined); setPlaying(false); audioRef.current?.pause();
+      await saveLastOpenedBookId(undefined);
+    }
     await refreshLibrary();
   }
 
@@ -231,16 +290,39 @@ export default function ReaderPage() {
   }
 
   const activeAsset = manifest?.audio_assets.find((item) => globalMs >= item.global_start_ms && globalMs < item.global_start_ms + item.duration_ms) ?? manifest?.audio_assets.at(-1);
+  const bookProgress = manifest ? Math.min(100, Math.round(Math.max(globalMs, furthestGlobalMs) / manifest.total_duration_ms * 100)) : 0;
+  const chapterProgress = chapter ? Math.min(100, Math.round(Math.max(0, globalMs - chapter.audio_start_ms) / (chapter.audio_end_ms - chapter.audio_start_ms) * 100)) : 0;
   return <main className={`reader-app theme-${theme}`}>
     {/* Audiobook text is rendered and highlighted in the adjacent reader instead of a WebVTT track. */}
     {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
     <audio ref={audioRef} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onTimeUpdate={(event) => setLogicalTime((activeAsset?.global_start_ms ?? 0) + event.currentTarget.currentTime * 1000)} onEnded={handleAssetEnd} />
-    <header className="reader-topbar"><a href="/" className="reader-brand">chapter<span>.</span>cut</a><strong>{manifest?.title ?? "Local reader"}</strong><div>{importing ? <button className="reader-cancel" onClick={() => importController.current?.abort()}>{importLabel} · Cancel</button> : <label className="reader-import">Import .zip<input type="file" accept=".zip,application/zip" onChange={(event) => event.target.files?.[0] && void importPackage(event.target.files[0])} /></label>}</div></header>
-    <aside className="reader-library"><div className="library-title"><span>LOCAL LIBRARY</span><b>{library.length}</b></div>{library.length ? library.map((item) => <div className={`library-book ${book?.book_id === item.book_id ? "active" : ""}`} key={item.book_id}><button onClick={() => void openBook(item)}><strong>{item.manifest.title}</strong><small>{item.manifest.author || "Unknown author"} · {formatClock(item.manifest.total_duration_ms)}</small></button><button className="book-delete" title="Remove from this device" onClick={() => void removeBook(item)}>×</button></div>) : <div className="library-empty">Import a processed BookSync ZIP. It stays in this browser.</div>}</aside>
+    <header className="reader-topbar">
+      <a href="/" className="reader-brand">chapter<span>.</span>cut</a>
+      <strong>{manifest?.title ?? "Local reader"}</strong>
+      <div className="reader-actions">
+        <button className="library-trigger" onClick={() => setLibraryOpen((open) => !open)} aria-expanded={libraryOpen}>Library <b>{library.length}</b></button>
+        {importing ? <button className="reader-cancel" onClick={() => importController.current?.abort()}>{importLabel} · Cancel</button> : <label className="reader-import">Import .zip<input type="file" accept=".zip,application/zip" onChange={(event) => event.target.files?.[0] && void importPackage(event.target.files[0])} /></label>}
+      </div>
+    </header>
+    <aside className={`reader-library ${libraryOpen ? "mobile-open" : ""}`}>
+      <div className="library-title"><span>YOUR LIBRARY</span><b>{library.length}</b><button className="library-close" onClick={() => setLibraryOpen(false)} aria-label="Close library">×</button></div>
+      {library.length ? library.map((item) => {
+        const progress = positions[item.book_id];
+        const percent = Math.min(100, Math.round((progress?.furthest_global_ms ?? progress?.global_ms ?? 0) / item.manifest.total_duration_ms * 100));
+        return <div className={`library-book ${book?.book_id === item.book_id ? "active" : ""}`} key={item.book_id}>
+          <button onClick={() => void openBook(item)}><strong>{item.manifest.title}</strong><small>{item.manifest.author || "Unknown author"} · {percent}% complete</small><i><em style={{ width: `${percent}%` }} /></i></button>
+          <button className="book-delete" title="Remove from this device" aria-label={`Remove ${item.manifest.title}`} onClick={() => void removeBook(item)}>×</button>
+        </div>;
+      }) : <div className="library-empty">Import a processed BookSync ZIP. It remains available after you close the app.</div>}
+    </aside>
     {manifest && chapter ? <>
-      <nav className="chapter-nav"><span>CHAPTERS</span>{manifest.chapters.map((item, index) => <button className={index === chapterIndex ? "active" : ""} key={item.id} onClick={() => { setChapterIndex(index); void seekGlobal(item.audio_start_ms); }}><b>{String(index + 1).padStart(2, "0")}</b><span>{item.title || item.label}</span></button>)}</nav>
-      <section className="reader-stage"><div className="reader-tools"><div><button onClick={() => setTheme("paper")} aria-label="Paper theme">☀</button><button onClick={() => setTheme("night")} aria-label="Night theme">◐</button><button onClick={() => setTheme("contrast")} aria-label="High contrast theme">◒</button></div><div><button onClick={() => setFontSize(Math.max(15, fontSize - 1))}>A−</button><span>{fontSize}</span><button onClick={() => setFontSize(Math.min(30, fontSize + 1))}>A+</button></div><label><input type="checkbox" checked={follow} onChange={(event) => setFollow(event.target.checked)} /> Follow audio</label></div>{renderedChapter}</section>
-      <footer className="player"><div className="now-reading"><small>{chapter.title || chapter.label}</small><strong>{currentSentence?.text ?? "Ready to listen"}</strong></div><div className="transport"><div><button onClick={() => chapterStep(-1)} title="Previous chapter">|‹</button><button onClick={() => sentenceStep(-1)} title="Previous sentence">‹</button><button className="play" onClick={() => playing ? audioRef.current?.pause() : void seekGlobal(globalMs, true)}>{playing ? "Ⅱ" : "▶"}</button><button onClick={() => sentenceStep(1)} title="Next sentence">›</button><button onClick={() => chapterStep(1)} title="Next chapter">›|</button></div><label><span>{formatClock(globalMs)}</span><input type="range" min="0" max={manifest.total_duration_ms} step="1000" value={globalMs} onChange={(event) => { audioRef.current?.pause(); void seekGlobal(Number(event.target.value), false); }} onMouseUp={() => playing && void audioRef.current?.play()} /><span>{formatClock(manifest.total_duration_ms)}</span></label></div><select value={rate} onChange={(event) => { const next = Number(event.target.value); setRate(next); if (audioRef.current) audioRef.current.playbackRate = next; }}>{[0.75, 1, 1.25, 1.5, 1.75, 2].map((value) => <option key={value} value={value}>{value}×</option>)}</select></footer>
+      <nav className="chapter-nav"><span>CHAPTERS · {completedChapterIds.length}/{manifest.chapters.length}</span>{manifest.chapters.map((item, index) => <button className={`${index === chapterIndex ? "active" : ""} ${completedChapterIds.includes(item.id) ? "complete" : ""}`} key={item.id} onClick={() => { setChapterIndex(index); void seekGlobal(item.audio_start_ms); }}><b>{completedChapterIds.includes(item.id) ? "✓" : String(index + 1).padStart(2, "0")}</b><span>{item.title || item.label}</span></button>)}</nav>
+      <section className="reader-stage">
+        <div className="reader-tools"><div><button onClick={() => setTheme("paper")} aria-label="Paper theme">☀</button><button onClick={() => setTheme("night")} aria-label="Night theme">◐</button><button onClick={() => setTheme("contrast")} aria-label="High contrast theme">◒</button></div><div><button onClick={() => setFontSize(Math.max(17, fontSize - 1))} aria-label="Decrease text size">A−</button><span>{fontSize}px</span><button onClick={() => setFontSize(Math.min(32, fontSize + 1))} aria-label="Increase text size">A+</button></div><label><input type="checkbox" checked={follow} onChange={(event) => setFollow(event.target.checked)} /> Follow audio</label></div>
+        <div className="progress-card"><div><span>BOOK PROGRESS</span><b>{bookProgress}%</b></div><progress value={bookProgress} max="100" /><small>{completedChapterIds.length} of {manifest.chapters.length} chapters completed · Chapter {chapterIndex + 1} is {chapterProgress}% complete</small></div>
+        {renderedChapter}
+      </section>
+      <footer className="player"><div className="now-reading"><small>{chapter.title || chapter.label} · {chapterProgress}%</small><strong>{currentSentence?.text ?? "Ready to listen"}</strong></div><div className="transport"><div><button onClick={() => chapterStep(-1)} title="Previous chapter" aria-label="Previous chapter">|‹</button><button onClick={() => sentenceStep(-1)} title="Previous sentence" aria-label="Previous sentence">‹</button><button className="play" onClick={() => playing ? audioRef.current?.pause() : void seekGlobal(globalMs, true)} aria-label={playing ? "Pause audiobook" : "Play audiobook"}>{playing ? "Ⅱ" : "▶"}</button><button onClick={() => sentenceStep(1)} title="Next sentence" aria-label="Next sentence">›</button><button onClick={() => chapterStep(1)} title="Next chapter" aria-label="Next chapter">›|</button></div><label><span>{formatClock(globalMs)}</span><input aria-label="Audiobook progress" type="range" min="0" max={manifest.total_duration_ms} step="1000" value={globalMs} onChange={(event) => { audioRef.current?.pause(); void seekGlobal(Number(event.target.value), false); }} onMouseUp={() => playing && void audioRef.current?.play()} onTouchEnd={() => playing && void audioRef.current?.play()} /><span>{formatClock(manifest.total_duration_ms)}</span></label></div><div className="speed-control" aria-label="Playback speed">{[0.75, 1, 1.25, 1.5, 1.75, 2].map((value) => <button key={value} className={rate === value ? "active" : ""} onClick={() => { setRate(value); if (audioRef.current) audioRef.current.playbackRate = value; }} aria-pressed={rate === value}>{value}×</button>)}</div></footer>
     </> : <section className="reader-welcome"><span>LOCAL · PRIVATE · SYNCHRONIZED</span><h1>Read with<br />the narrator.</h1><p>Import a validated BookSync ZIP to read the EPUB, hear the audiobook, and follow each sentence as it is spoken.</p>{importing ? <button className="welcome-import reader-cancel" onClick={() => importController.current?.abort()}>{importLabel} · Cancel</button> : <label className="welcome-import">Choose a BookSync ZIP<input type="file" accept=".zip,application/zip" onChange={(event) => event.target.files?.[0] && void importPackage(event.target.files[0])} /></label>}<small className="storage-state">{storagePersistent ? "Offline storage is protected from automatic eviction." : "Your browser may reclaim local books when storage is low."}</small>{error && <p className="reader-error">{error}</p>}</section>}
     {error && manifest && <div className="reader-toast">{error}</div>}
   </main>;
