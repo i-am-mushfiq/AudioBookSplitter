@@ -1,0 +1,67 @@
+name: Build unsigned iPhone IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  unsigned-ipa:
+    name: Compile and package unsigned IPA
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build and synchronize shared reader
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run mobile:sync
+
+      - name: Compile iPhone app without signing
+        run: |
+          xcodebuild \
+            -project frontend/ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            -derivedDataPath "$RUNNER_TEMP/booksync-derived-data" \
+            build
+
+      - name: Create unsigned IPA artifact
+        shell: bash
+        run: |
+          app_bundle=$(find "$RUNNER_TEMP/booksync-derived-data/Build/Products/Release-iphoneos" -maxdepth 1 -type d -name '*.app' -print -quit)
+          test -n "$app_bundle"
+          payload="$RUNNER_TEMP/Payload"
+          rm -rf "$payload" "$RUNNER_TEMP/BookSync-Reader-unsigned.ipa"
+          mkdir -p "$payload"
+          cp -R "$app_bundle" "$payload/"
+          (
+            cd "$RUNNER_TEMP"
+            zip -qry BookSync-Reader-unsigned.ipa Payload
+          )
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: BookSync-Reader-${{ github.run_number }}-unsigned-ipa
+          path: ${{ runner.temp }}/BookSync-Reader-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
