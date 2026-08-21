@@ -82,6 +82,19 @@ test("a chapter-boundary session advances exactly one asset", () => {
   assert.equal(content.nextAudioAsset(assets, "chapter_2_part_1"), undefined);
 });
 
+test("identifies only real in-chapter session transitions", () => {
+  const locator = (asset_id, global_start_ms) => ({ asset_id, start_ms: 0, end_ms: 100, global_start_ms });
+  const entries = [
+    { sentence_id: "s1", audio_locator: locator("aud_1", 0) },
+    { sentence_id: "s2", audio_locator: locator("aud_1", 100) },
+    { sentence_id: "unmatched", audio_locator: null },
+    { sentence_id: "s3", audio_locator: locator("aud_2", 600_000) },
+    { sentence_id: "s4", audio_locator: locator("aud_2", 600_100) },
+    { sentence_id: "s5", audio_locator: locator("aud_3", 1_200_000) },
+  ];
+  assert.deepEqual(content.sessionTransitionSentenceIds(entries), ["s3", "s5"]);
+});
+
 const privatePackage = resolve(root, "..", "test1-milestone2-output", "Animal_Farm.booksync");
 test("validates every declared file in the available full-book package", { skip: !existsSync(privatePackage) }, async () => {
   const manifest = await validation.validateManifest(JSON.parse(await readFile(resolve(privatePackage, "manifest.json"), "utf8")));

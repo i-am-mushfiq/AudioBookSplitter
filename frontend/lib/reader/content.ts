@@ -57,6 +57,18 @@ export function nextAudioAsset(assets: BookSyncAudioAsset[], assetId: string | u
   return index >= 0 ? assets[index + 1] : undefined;
 }
 
+export function sessionTransitionSentenceIds(entries: BookSyncOverlayEntry[]) {
+  const transitions: string[] = [];
+  let previousAssetId: string | undefined;
+  for (const entry of entries) {
+    const assetId = entry.audio_locator?.asset_id;
+    if (!assetId) continue;
+    if (previousAssetId && assetId !== previousAssetId) transitions.push(entry.sentence_id);
+    previousAssetId = assetId;
+  }
+  return transitions;
+}
+
 export function formatClock(milliseconds: number) {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000));
   const hours = Math.floor(seconds / 3600);

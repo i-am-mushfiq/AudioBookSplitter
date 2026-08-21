@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { BookSyncOverlay, BookSyncOverlayEntry } from "../../lib/booksync/types";
-import { activeEntry, activeWordIndex, formatClock, loadedAudioAsset, logicalTimeForAudioAsset, nextAudioAsset, safeChapterMarkup } from "../../lib/reader/content";
+import { activeEntry, activeWordIndex, formatClock, loadedAudioAsset, logicalTimeForAudioAsset, nextAudioAsset, safeChapterMarkup, sessionTransitionSentenceIds } from "../../lib/reader/content";
 import { deleteLocalBook, importBookSyncZip, listLocalBooks, listPositions, loadHighlights, loadLastOpenedBookId, loadPosition, readPackageFile, readPackageText, saveHighlights, saveLastOpenedBookId, savePosition, verifyLocalBook, type ImportProgress, type LocalBookRecord, type ReaderHighlight, type ReaderPosition } from "../../lib/reader/library";
 import "./reader.css";
 import "./highlight.css";
@@ -260,6 +260,20 @@ export default function ReaderPage() {
   }, [savedHighlights, markup]);
 
   useEffect(() => {
+    const root = readerRef.current;
+    if (!root) return;
+    root.querySelectorAll(".booksync-session-divider").forEach((node) => node.remove());
+    for (const sentenceId of sessionTransitionSentenceIds(entries)) {
+      const sentence = document.getElementById(sentenceId);
+      if (!sentence || !root.contains(sentence)) continue;
+      const divider = document.createElement("span");
+      divider.className = "booksync-session-divider";
+      divider.setAttribute("aria-hidden", "true");
+      sentence.before(divider);
+    }
+  }, [entries, markup]);
+
+  useEffect(() => {
     if (!manifest || !chapter || playing) return;
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
@@ -372,8 +386,8 @@ export default function ReaderPage() {
   }
 
   const activeAsset = manifest?.audio_assets.find((item) => globalMs >= item.global_start_ms && globalMs < item.global_start_ms + item.duration_ms) ?? manifest?.audio_assets.at(-1);
-  const bookProgress = manifest ? Math.min(100, Math.round(Math.max(globalMs, furthestGlobalMs) / manifest.total_duration_ms * 100)) : 0;
   const chapterProgress = chapter ? Math.min(100, Math.round(Math.max(0, globalMs - chapter.audio_start_ms) / (chapter.audio_end_ms - chapter.audio_start_ms) * 100)) : 0;
+  const sessionProgress = activeAsset ? Math.min(100, Math.max(0, Math.round((globalMs - activeAsset.global_start_ms) / activeAsset.duration_ms * 100))) : 0;
   const resumeBook = library.find((item) => item.book_id === lastOpenedBookId);
   const activeSessionIndex = manifest && activeAsset ? manifest.audio_assets.findIndex((item) => item.id === activeAsset.id) : -1;
   const artwork = (record: LocalBookRecord) => <div className="book-artwork" aria-hidden="true">{coverUrls[record.book_id] ? <img src={coverUrls[record.book_id]} alt="" /> : <span>{record.manifest.title.trim().slice(0, 1).toUpperCase() || "B"}</span>}</div>;
@@ -416,7 +430,7 @@ export default function ReaderPage() {
           <div><button onClick={() => setFontSize(Math.max(19, fontSize - 1))} aria-label="Decrease text size">A−</button><span>{fontSize}px</span><button onClick={() => setFontSize(Math.min(38, fontSize + 1))} aria-label="Increase text size">A+</button></div>
           <button className={`follow-toggle ${follow ? "active" : ""}`} aria-pressed={follow} onClick={() => setFollow((value) => !value)} title="Follow the narrated sentence"><b>◎</b><span>{follow ? "Follow" : "Free"}</span></button>
         </div>
-        <div className="reader-progress-strip"><span style={{ width: `${bookProgress}%` }} /><small>{bookProgress}% of book</small></div>
+        <div className="reader-progress-strip"><span style={{ width: `${sessionProgress}%` }} /><small>{activeSessionIndex >= 0 ? `Session ${activeSessionIndex + 1} · ${sessionProgress}%` : "Session ready"}</small></div>
         {renderedChapter}
       </section>
       <footer className="player">
