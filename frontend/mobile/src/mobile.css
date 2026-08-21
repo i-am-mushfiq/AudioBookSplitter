@@ -34,7 +34,6 @@ body {
     --reader-highlight: #2b6540;
     --reader-line: #303030;
   }
-  .surface-reader .reader-topbar { background: #121212; color: #fff; border-color: #303030; }
   .surface-reader .reader-stage { background: var(--reader-bg); color: var(--reader-text); }
   .surface-reader .reader-tools { background: rgba(20,20,20,.95); border-color: #303030; }
   .book-content .booksync-active { background: #2b6540; box-shadow: 0 0 0 3px #2b6540; }

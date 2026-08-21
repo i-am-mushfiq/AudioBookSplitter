@@ -71,17 +71,12 @@
 .library-mini-player small { display: block; color: var(--accent); font-size: 9px; font-weight: 850; letter-spacing: .12em; }
 .library-mini-player strong { display: block; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.surface-reader { grid-template: 66px minmax(0, 1fr) 136px / 1fr; }
-.surface-reader .reader-topbar { grid-column: 1; grid-row: 1; grid-template-columns: minmax(110px, 1fr) minmax(0, 2fr) minmax(110px, 1fr); background: #fafaf6; }
-.surface-reader .reader-topbar > * { padding: 0 20px; }
-.surface-reader .reader-topbar > strong { font-size: 14px; }
-.reader-back,
-.contents-trigger { min-height: 44px; border: 0; background: transparent; color: inherit; font-size: 14px; font-weight: 800; cursor: pointer; }
-.reader-back { justify-self: start; }
-.contents-trigger { justify-self: end; }
-.surface-reader .reader-stage { grid-column: 1; grid-row: 2; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.surface-reader { grid-template: minmax(0, 1fr) 136px / 1fr; }
+.surface-reader .reader-stage { grid-column: 1; grid-row: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .surface-reader .reader-tools { height: 62px; justify-content: space-between; padding: 0 24px; gap: 16px; }
-.chapter-location { max-width: 48%; display: block; overflow: hidden; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.inline-back { flex: 0 0 auto; min-width: 84px; min-height: 44px; padding: 0 12px !important; border: 1px solid color-mix(in srgb,currentColor 22%,transparent) !important; border-radius: 999px; background: transparent; color: inherit; font-size: 13px !important; font-weight: 850; cursor: pointer; }
+.inline-back span { margin-left: 4px; }
+.chapter-location { flex: 1 1 auto; min-width: 0; max-width: 520px; display: block; overflow: hidden; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .chapter-location small,
 .chapter-location strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chapter-location small { font-size: 9px; font-weight: 850; letter-spacing: .12em; opacity: .55; }
@@ -92,7 +87,7 @@
 .reader-progress-strip small { position: absolute; right: 14px; top: 9px; padding: 4px 7px; border-radius: 99px; background: color-mix(in srgb, var(--reader-bg) 92%, transparent); color: var(--reader-text); font: 9px Arial,sans-serif; opacity: .7; }
 .surface-reader .book-content { max-width: 820px; padding: 54px 64px 90px; line-height: 1.8; }
 
-.surface-reader .player { grid-column: 1; grid-row: 3; grid-template-columns: minmax(210px, 1fr) minmax(430px, 2fr) 66px; min-height: 136px; padding: 15px 24px; gap: 26px; }
+.surface-reader .player { grid-column: 1; grid-row: 2; grid-template-columns: minmax(210px, 1fr) minmax(430px, 2fr) 66px; min-height: 136px; padding: 15px 24px; gap: 26px; }
 .surface-reader .now-reading { min-width: 0; display: flex; align-items: center; gap: 16px; border: 0; background: transparent; color: #fff; text-align: left; cursor: pointer; }
 .surface-reader .now-reading > span { min-width: 0; flex: 1; }
 .surface-reader .now-reading small { display: block; margin-bottom: 6px; color: var(--reader-lime); font-size: 9px; font-weight: 850; letter-spacing: .12em; }
@@ -150,14 +145,11 @@
   .library-book-copy small { font-size: 14px; }
   .book-delete { right: -4px; }
 
-  .surface-reader { grid-template: 64px minmax(0, 1fr) 174px / 1fr; }
-  .surface-reader .reader-topbar { grid-template-columns: 100px minmax(0, 1fr) 100px; min-height: 64px; }
-  .surface-reader .reader-topbar > * { padding: 0 12px; }
-  .surface-reader .reader-topbar > strong { display: block; padding: 0 4px; font-size: 13px; }
-  .reader-back,
-  .contents-trigger { min-height: 48px; padding: 0 !important; font-size: 14px; }
+  .surface-reader { grid-template: minmax(0, 1fr) 174px / 1fr; }
   .surface-reader .reader-tools { min-height: 66px; padding: 0 13px; gap: 8px; }
-  .chapter-location { max-width: 45%; }
+  .inline-back { min-width: 48px; width: 48px; min-height: 48px; padding: 0 !important; font-size: 24px !important; }
+  .inline-back span { display: none; }
+  .chapter-location { max-width: none; }
   .chapter-location strong { font-size: 12px; }
   .surface-reader .reader-tools > div button { min-width: 42px; min-height: 44px; font-size: 15px; }
   .surface-reader .reader-tools > div span { min-width: 40px; text-align: center; }
@@ -191,10 +183,8 @@
   .reader-import span { display: none; }
   .reader-import { width: 52px; padding: 0; }
   .resume-card small { font-size: 9px; }
-  .surface-reader .reader-topbar { grid-template-columns: 78px minmax(0, 1fr) 80px; }
-  .reader-back span { display: none; }
   .surface-reader .reader-tools { padding: 0 8px; }
-  .chapter-location { max-width: 39%; }
+  .chapter-location small { font-size: 8px; letter-spacing: .08em; }
   .surface-reader .reader-tools > div span { display: none; }
   .surface-reader .transport > div { gap: 6px; }
 }

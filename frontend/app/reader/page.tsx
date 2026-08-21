@@ -352,13 +352,8 @@ export default function ReaderPage() {
       {error && <p className="reader-error library-error">{error}</p>}
       {book && <button className="library-mini-player" onClick={() => setSurface("reader")}>{artwork(book)}<span><small>{playing ? "NOW PLAYING" : "READY TO RESUME"}</small><strong>{book.manifest.title}</strong></span><b>Open&nbsp;›</b></button>}
     </section> : manifest && chapter ? <>
-      <header className="reader-topbar">
-        <button className="reader-back" onClick={() => { setSurface("library"); setContentsOpen(false); setSpeedOpen(false); }}>‹ <span>Library</span></button>
-        <strong>{manifest.title}</strong>
-        <button className="contents-trigger" onClick={() => setContentsOpen(true)}>Contents</button>
-      </header>
       <section className="reader-stage">
-        <div className="reader-tools"><button className="chapter-location" onClick={() => setContentsOpen(true)}><small>CHAPTER {chapterIndex + 1} OF {manifest.chapters.length}</small><strong>{chapter.title || chapter.label}</strong></button><div><button onClick={() => setFontSize(Math.max(19, fontSize - 1))} aria-label="Decrease text size">A−</button><span>{fontSize}px</span><button onClick={() => setFontSize(Math.min(38, fontSize + 1))} aria-label="Increase text size">A+</button></div><button className="follow-toggle" aria-pressed={follow} onClick={() => setFollow((value) => !value)}>{follow ? "Follow on" : "Follow off"}</button></div>
+        <div className="reader-tools"><button className="inline-back" onClick={() => { setSurface("library"); setContentsOpen(false); setSpeedOpen(false); }} aria-label="Return to library">‹ <span>Library</span></button><button className="chapter-location" onClick={() => setContentsOpen(true)} aria-label={`Open contents. Chapter ${chapterIndex + 1} of ${manifest.chapters.length}: ${chapter.title || chapter.label}`}><small>CHAPTER {chapterIndex + 1} OF {manifest.chapters.length}</small><strong>{chapter.title || chapter.label}</strong></button><div><button onClick={() => setFontSize(Math.max(19, fontSize - 1))} aria-label="Decrease text size">A−</button><span>{fontSize}px</span><button onClick={() => setFontSize(Math.min(38, fontSize + 1))} aria-label="Increase text size">A+</button></div><button className="follow-toggle" aria-pressed={follow} onClick={() => setFollow((value) => !value)}>{follow ? "Follow on" : "Follow off"}</button></div>
         <div className="reader-progress-strip"><span style={{ width: `${bookProgress}%` }} /><small>{bookProgress}% of book</small></div>
         {renderedChapter}
       </section>
