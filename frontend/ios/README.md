@@ -29,3 +29,14 @@ xcodebuild -exportArchive -archivePath build/BookSync.xcarchive -exportOptionsPl
 ```
 
 The resulting IPA is `build/ipa/BookSync Reader.ipa`. Do not commit IPA files, signing certificates, provisioning profiles, or Xcode derived data.
+
+## Build on GitHub Actions
+
+The repository includes [`.github/workflows/ios-ipa.yml`](../../.github/workflows/ios-ipa.yml), which uses a GitHub-hosted macOS runner to build the IPA. Add these repository secrets before running **Build iPhone IPA** from the Actions tab:
+
+- `IOS_CERTIFICATE_BASE64`: Base64-encoded Apple distribution or development `.p12` certificate.
+- `IOS_CERTIFICATE_PASSWORD`: Password used when exporting the `.p12`.
+- `IOS_PROVISION_PROFILE_BASE64`: Base64-encoded provisioning profile matching `com.mushfiq.booksync`.
+- `APPLE_TEAM_ID`: Your ten-character Apple Developer Team ID.
+
+Select `development` for registered test devices, `ad-hoc` for registered-device distribution, or `app-store` for TestFlight/App Store uploads. The signed IPA is retained as a private Actions artifact for 14 days.

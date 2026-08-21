@@ -1,0 +1,92 @@
+name: Build iPhone IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      export_method:
+        description: Apple distribution method for the supplied provisioning profile
+        required: true
+        default: development
+        type: choice
+        options:
+          - development
+          - ad-hoc
+          - app-store
+permissions:
+  contents: read
+
+jobs:
+  ipa:
+    name: Signed IPA
+    runs-on: macos-latest
+    env:
+      IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+      IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+      IOS_PROVISION_PROFILE_BASE64: ${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      EXPORT_METHOD: ${{ inputs.export_method || 'development' }}
+      BUNDLE_ID: com.mushfiq.booksync
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Verify signing configuration
+        shell: bash
+        run: |
+          for secret in IOS_CERTIFICATE_BASE64 IOS_CERTIFICATE_PASSWORD IOS_PROVISION_PROFILE_BASE64 APPLE_TEAM_ID; do
+            if [ -z "${!secret}" ]; then
+              echo "Missing required GitHub Actions secret: $secret" >&2
+              exit 1
+            fi
+          done
+
+      - name: Build and synchronize shared reader
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run mobile:sync
+
+      - name: Install Apple signing assets
+        shell: bash
+        run: |
+          certificate_path="$RUNNER_TEMP/booksync_certificate.p12"
+          profile_path="$RUNNER_TEMP/booksync_profile.mobileprovision"
+          keychain_path="$RUNNER_TEMP/booksync-signing.keychain-db"
+          echo -n "$IOS_CERTIFICATE_BASE64" | base64 --decode > "$certificate_path"
+          echo -n "$IOS_PROVISION_PROFILE_BASE64" | base64 --decode > "$profile_path"
+          security create-keychain -p "$IOS_CERTIFICATE_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$IOS_CERTIFICATE_PASSWORD" "$keychain_path"
+          security import "$certificate_path" -P "$IOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          security list-keychain -d user -s "$keychain_path"
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          profile_uuid=$(security cms -D -i "$profile_path" | plutil -extract UUID raw -)
+          cp "$profile_path" "$HOME/Library/MobileDevice/Provisioning Profiles/$profile_uuid.mobileprovision"
+          echo "PROFILE_UUID=$profile_uuid" >> "$GITHUB_ENV"
+
+      - name: Archive and export IPA
+        shell: bash
+        run: |
+          export_options="$RUNNER_TEMP/ExportOptions.plist"
+          plutil -create xml1 "$export_options"
+          /usr/libexec/PlistBuddy -c 'Add :method string '"$EXPORT_METHOD" "$export_options"
+          /usr/libexec/PlistBuddy -c 'Add :signingStyle string manual' "$export_options"
+          /usr/libexec/PlistBuddy -c 'Add :teamID string '"$APPLE_TEAM_ID" "$export_options"
+          /usr/libexec/PlistBuddy -c 'Add :provisioningProfiles dict' "$export_options"
+          /usr/libexec/PlistBuddy -c 'Add :provisioningProfiles:'"$BUNDLE_ID"' string '"$PROFILE_UUID" "$export_options"
+          xcodebuild -project frontend/ios/App/App.xcodeproj -scheme App -configuration Release -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/BookSync.xcarchive" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" CODE_SIGN_STYLE=Manual PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" archive
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/BookSync.xcarchive" -exportOptionsPlist "$export_options" -exportPath "$RUNNER_TEMP/ipa"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: BookSync-Reader-${{ github.run_number }}-${{ env.EXPORT_METHOD }}-ipa
+          path: ${{ runner.temp }}/ipa/*.ipa
+          if-no-files-found: error
+          retention-days: 14
