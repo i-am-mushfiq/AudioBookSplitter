@@ -53,7 +53,7 @@ export default function ReaderPage() {
   const manifest = book?.manifest;
   const chapter = manifest?.chapters[chapterIndex];
   const currentSentence = useMemo(() => activeEntry(entries, globalMs), [entries, globalMs]);
-  const renderedChapter = <article ref={readerRef} className={`book-content ${highlightMode ? "highlight-mode" : ""}`} style={{ fontSize }} onClick={handleReaderTap} dangerouslySetInnerHTML={{ __html: markup }} />;
+  const renderedChapter = useMemo(() => <article ref={readerRef} className="book-content" style={{ fontSize }} dangerouslySetInnerHTML={{ __html: markup }} />, [fontSize, markup]);
   latestPosition.current = manifest && chapter ? {
     book_id: manifest.book_id,
     global_ms: globalMs,
@@ -408,7 +408,7 @@ export default function ReaderPage() {
       {error && <p className="reader-error library-error">{error}</p>}
       {book && <button className="library-mini-player" onClick={() => setSurface("reader")}>{artwork(book)}<span><small>{playing ? "NOW PLAYING" : "READY TO RESUME"}</small><strong>{book.manifest.title}</strong></span><b>Open&nbsp;›</b></button>}
     </section> : manifest && chapter ? <>
-      <section className="reader-stage">
+      <section className={`reader-stage ${highlightMode ? "highlight-mode" : ""}`} onClick={handleReaderTap}>
         <div className="reader-tools">
           <button className="inline-back" onClick={() => { setSurface("library"); setContentsOpen(false); setSpeedOpen(false); }} aria-label="Return to library">‹ <span>Library</span></button>
           <button className="chapter-location" onClick={() => setContentsOpen(true)} aria-label={`Open contents. Chapter ${chapterIndex + 1} of ${manifest.chapters.length}: ${chapter.title || chapter.label}`}><small>CHAPTER {chapterIndex + 1} OF {manifest.chapters.length}</small><strong>{chapter.title || chapter.label}</strong></button>

@@ -14,6 +14,13 @@ const validation = await vite.ssrLoadModule("/lib/reader/validation.ts");
 const content = await vite.ssrLoadModule("/lib/reader/content.ts");
 const fixtureRoot = resolve(root, "..", "examples", "minimal.booksync");
 
+test("keeps chapter HTML stable while audio timing updates", async () => {
+  const readerSource = await readFile(resolve(root, "app", "reader", "page.tsx"), "utf8");
+  assert.match(readerSource, /const renderedChapter = useMemo\(/);
+  assert.match(readerSource, /<section className=\{`reader-stage/);
+  assert.doesNotMatch(readerSource, /<article[^>]+onClick=\{handleReaderTap\}[^>]+dangerouslySetInnerHTML/);
+});
+
 test("accepts the canonical manifest and overlay", async () => {
   const manifest = await validation.validateManifest(JSON.parse(await readFile(resolve(fixtureRoot, "manifest.json"), "utf8")));
   const overlayPath = manifest.overlay_assets[0].path;
