@@ -66,7 +66,7 @@ Inside a book, select **Contents** to switch between two useful views:
 - **Chapters** shows the book's hard chapter boundaries, duration, completion, and current chapter.
 - **Timed sessions** shows every manageable audio part already created by BookSync. These sessions remain chapter-safe and never combine two chapters.
 
-The mobile reader uses larger type and touch targets, a compact audiobook player, sentence-by-sentence navigation, and a separate playback-speed panel so the book itself has more room on screen. When playback starts, Follow immediately centers the sentence already being narrated. A subtle short divider marks each timed-session transition in the text, and the thin green bar tracks the current session rather than the whole book.
+The mobile reader uses one library for imported and streamed books, larger type and touch targets, a compact audiobook player, sentence-by-sentence navigation, and a separate playback-speed panel so the book itself has more room on screen. Streamed books carry a small cloud/play badge on their cover; no badge means the book is local. When playback starts, Follow immediately centers the sentence already being narrated. A subtle short divider marks each timed-session transition in the text, and the thin green bar tracks the current session rather than the whole book.
 
 For personal recall marks, turn on **✦ Highlight** and tap a sentence once. Tap it again to remove the mark. Personal highlights persist with the local book, remain visually distinct from the live narrator highlight, and are available from **Contents → Highlights**.
 

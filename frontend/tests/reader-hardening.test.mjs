@@ -38,6 +38,15 @@ test("uses the canonical private Hugging Face dataset without an editable reposi
   assert.doesNotMatch(readerSource, /setHuggingFaceRepo|<span>Dataset<\/span>/);
 });
 
+test("presents local and streamed books in one library with only a stream badge as source chrome", async () => {
+  const readerSource = await readFile(resolve(root, "app", "reader", "page.tsx"), "utf8");
+  const sourcesSource = await readFile(resolve(root, "lib", "reader", "sources.ts"), "utf8");
+  assert.match(readerSource, /isRemoteBook\(record\) && <span className="book-stream-badge">/);
+  assert.doesNotMatch(readerSource, /Oracle stream|>Offline<|\? "Hugging Face"/);
+  assert.match(sourcesSource, /for \(const record of remote\) books\.set\(record\.book_id, record\);/);
+  assert.match(sourcesSource, /for \(const record of local\) books\.set\(record\.book_id, record\);/);
+});
+
 test("accepts the canonical manifest and overlay", async () => {
   const manifest = await validation.validateManifest(JSON.parse(await readFile(resolve(fixtureRoot, "manifest.json"), "utf8")));
   const overlayPath = manifest.overlay_assets[0].path;

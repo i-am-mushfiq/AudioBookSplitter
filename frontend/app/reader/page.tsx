@@ -5,7 +5,7 @@ import type { BookSyncOverlay, BookSyncOverlayEntry } from "../../lib/booksync/t
 import { activeEntry, activeWordIndex, formatClock, loadedAudioAsset, logicalTimeForAudioAsset, nextAudioAsset, safeChapterMarkup, sessionTransitionSentenceIds } from "../../lib/reader/content";
 import { importBookSyncZip, listPositions, loadHighlights, loadLastOpenedBookId, loadPosition, saveHighlights, saveLastOpenedBookId, savePosition, type ImportProgress, type ReaderHighlight, type ReaderPosition } from "../../lib/reader/library";
 import { connectHuggingFaceLibrary, connectOracleLibrary, disconnectRemoteLibrary, getOracleCacheStats, listHuggingFaceProviders, listOracleProviders, type OracleCacheStats } from "../../lib/reader/oracle-library";
-import { isHuggingFaceBook, isOracleBook, isRemoteBook, listReaderBooks, playableAudio, prefetchAudioWindow, prepareAudioCacheWindow, readReaderFile, readReaderText, removeReaderBook, verifyReaderBook, type ReaderBookRecord } from "../../lib/reader/sources";
+import { isRemoteBook, listReaderBooks, playableAudio, prefetchAudioWindow, prepareAudioCacheWindow, readReaderFile, readReaderText, removeReaderBook, verifyReaderBook, type ReaderBookRecord } from "../../lib/reader/sources";
 import "./reader.css";
 import "./highlight.css";
 import "./reader-progress.css";
@@ -444,7 +444,7 @@ export default function ReaderPage() {
   const sessionProgress = activeAsset ? Math.min(100, Math.max(0, Math.round((globalMs - activeAsset.global_start_ms) / activeAsset.duration_ms * 100))) : 0;
   const resumeBook = library.find((item) => item.book_id === lastOpenedBookId);
   const activeSessionIndex = manifest && activeAsset ? manifest.audio_assets.findIndex((item) => item.id === activeAsset.id) : -1;
-  const artwork = (record: ReaderBookRecord) => <div className="book-artwork" aria-hidden="true">{coverUrls[record.book_id] ? <img src={coverUrls[record.book_id]} alt="" /> : <span>{record.manifest.title.trim().slice(0, 1).toUpperCase() || "B"}</span>}</div>;
+  const artwork = (record: ReaderBookRecord) => <div className="book-artwork" aria-hidden="true">{coverUrls[record.book_id] ? <img src={coverUrls[record.book_id]} alt="" /> : <span className="book-artwork-letter">{record.manifest.title.trim().slice(0, 1).toUpperCase() || "B"}</span>}{isRemoteBook(record) && <span className="book-stream-badge"><svg viewBox="0 0 24 24" focusable="false"><path d="M7.2 18.2h9.7a4.1 4.1 0 0 0 .5-8.2A6.2 6.2 0 0 0 5.6 8.7a4.8 4.8 0 0 0 1.6 9.5Z" /><path className="stream-play" d="m10.2 9.2 5 3.1-5 3.1Z" /></svg></span>}</div>;
   const formatBytes = (bytes: number) => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`;
 
   return <main className={`reader-app theme-${theme} surface-${surface}`}>
@@ -461,7 +461,7 @@ export default function ReaderPage() {
           {importing ? <button className="reader-cancel" onClick={() => importController.current?.abort()}>{importLabel} · Cancel</button> : <button className="reader-import" aria-label="Import BookSync ZIP" onClick={() => fileInputRef.current?.click()}><b aria-hidden="true">＋</b><span>Import book</span></button>}
         </div>
       </header>
-      {resumeBook && <button className="resume-card" onClick={() => void openBook(resumeBook)}>
+      {resumeBook && <button className="resume-card" aria-label={`Resume ${resumeBook.manifest.title}${isRemoteBook(resumeBook) ? ", streamed" : ""}`} onClick={() => void openBook(resumeBook)}>
         {artwork(resumeBook)}
         <span><small>CONTINUE READING</small><strong>{resumeBook.manifest.title}</strong><em>{resumeBook.manifest.author || "Unknown author"}</em></span>
         <b>Resume&nbsp;›</b>
@@ -472,14 +472,14 @@ export default function ReaderPage() {
         const progress = positions[item.book_id];
         const percent = Math.min(100, Math.round((progress?.furthest_global_ms ?? progress?.global_ms ?? 0) / item.manifest.total_duration_ms * 100));
         return <article className="library-row" key={item.book_id}>
-          <button className="library-open-book" onClick={() => void openBook(item)}>{artwork(item)}<span className="library-book-copy"><strong>{item.manifest.title}</strong><small>{item.manifest.author || "Unknown author"}</small><em>{item.manifest.chapters.length} chapters · {formatClock(item.manifest.total_duration_ms)} · {isHuggingFaceBook(item) ? "Hugging Face" : isOracleBook(item) ? "Oracle stream" : "Offline"}</em><i><span style={{ width: `${percent}%` }} /></i><b>{percent}% complete</b></span><span className="row-arrow">›</span></button>
+          <button className="library-open-book" aria-label={`Open ${item.manifest.title}${isRemoteBook(item) ? ", streamed" : ""}`} onClick={() => void openBook(item)}>{artwork(item)}<span className="library-book-copy"><strong>{item.manifest.title}</strong><small>{item.manifest.author || "Unknown author"}</small><em>{item.manifest.chapters.length} chapters · {formatClock(item.manifest.total_duration_ms)}</em><i><span style={{ width: `${percent}%` }} /></i><b>{percent}% complete</b></span><span className="row-arrow">›</span></button>
           <button className="book-delete" title={isRemoteBook(item) ? "Hide this remote book and release its cache" : "Remove from this device"} aria-label={`Remove ${item.manifest.title}`} onClick={() => void removeBook(item)}>×</button>
         </article>;
       }) : <div className="library-empty"><b>Bring your first book.</b><span>Import a BookSync ZIP for offline reading, or connect Oracle or a private Hugging Face dataset for session-based listening.</span></div>}
       </div>
       <p className="storage-state">Remote cache {formatBytes(oracleCache.bytes)} · {oracleCache.audio_entries} audio sessions. Keeps previous 2, current, and next 3; {formatBytes(oracleCache.limit_bytes)} remains the safety ceiling. {storagePersistent ? "Local books use persistent device storage." : "iOS may still reclaim device data under critical pressure."}</p>
       {error && !oracleOpen && !huggingFaceOpen && <p className="reader-error library-error">{error}</p>}
-      {book && <button className="library-mini-player" onClick={() => setSurface("reader")}>{artwork(book)}<span><small>{playing ? "NOW PLAYING" : "READY TO RESUME"}</small><strong>{book.manifest.title}</strong></span><b>Open&nbsp;›</b></button>}
+      {book && <button className="library-mini-player" aria-label={`Open ${book.manifest.title}${isRemoteBook(book) ? ", streamed" : ""}`} onClick={() => setSurface("reader")}>{artwork(book)}<span><small>{playing ? "NOW PLAYING" : "READY TO RESUME"}</small><strong>{book.manifest.title}</strong></span><b>Open&nbsp;›</b></button>}
     </section> : manifest && chapter ? <>
       <section className={`reader-stage ${highlightMode ? "highlight-mode" : ""}`} onClick={handleReaderTap}>
         <div className="reader-tools">

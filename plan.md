@@ -467,6 +467,7 @@ The Oracle MVP currently caches:
 
 - Current chapter content
 - Current chapter overlay
+- One unified library surface for local and remote books; only remote covers display a stream badge
 - Previous 2, current, and next 3 audio sessions (bounded at book edges)
 - Cover image and small library metadata
 - No complete remote book automatically
