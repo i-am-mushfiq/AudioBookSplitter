@@ -111,11 +111,13 @@ Import a processed BookSync ZIP in `/reader` to:
 - show the current spoken word in darker green when word timings are available;
 - navigate by chapter or sentence;
 - change theme, font size, follow mode, and playback speed;
-- resume the saved chapter, sentence, position, and speed after reload.
+- reopen the last book automatically, with its saved chapter, sentence, position, and speed;
+- retain an offline local library across relaunches, with visible whole-book and chapter completion progress;
+- use larger touch controls, a mobile library drawer, and a persistent audio progress scrubber on iPhone.
 
 Older BookSync packages without the optional `words` overlay field continue to work with sentence-only highlighting. Reprocess an older source pair to add word highlighting.
 
-Reader imports validate schemas, exact sizes, SHA-256 checksums, paths, archive limits, timeline consistency, and word timing order before committing data atomically to IndexedDB. EPUB markup is sanitized with DOMPurify.
+Reader imports validate schemas, exact sizes, SHA-256 checksums, paths, archive limits, timeline consistency, and word timing order before committing data atomically to IndexedDB. EPUB markup is sanitized with DOMPurify. Database upgrades preserve existing local books rather than rebuilding their storage.
 
 ## Mobile targets
 

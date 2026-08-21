@@ -3,11 +3,12 @@ import type { BookId, BookSyncManifest, RelativePackagePath } from "../booksync/
 import { IMPORT_LIMITS, PackageValidationError, declaredFiles, expectedExpandedBytes, normalizePackagePath, validateArchiveEntry, validateDeclaredBlob, validateManifest, validateOverlay } from "./validation";
 
 const DB_NAME = "booksync-local-library";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const BOOKS = "books";
 const FILES = "files";
 const POSITIONS = "positions";
 const IMPORTS = "imports";
+const SETTINGS = "settings";
 
 export type ImportPhase = "reading-manifest" | "checking-storage" | "extracting" | "validating" | "committing";
 export interface ImportProgress { phase: ImportPhase; completed: number; total: number; path?: string }
@@ -28,6 +29,11 @@ export interface ReaderPosition {
   chapter_id: string;
   sentence_id?: string;
   playback_rate: number;
+  /** Furthest point reached; used for whole-book progress rather than just the last seek. */
+  furthest_global_ms?: number;
+  /** Chapter IDs completed by listening through at least 90% of the chapter. */
+  completed_chapter_ids?: string[];
+  completed_at?: string;
   updated_at: string;
 }
 
@@ -49,12 +55,16 @@ function openDatabase(): Promise<IDBDatabase> {
     const pending = indexedDB.open(DB_NAME, DB_VERSION);
     pending.onupgradeneeded = () => {
       const db = pending.result;
-      for (const store of [BOOKS, FILES, IMPORTS]) if (db.objectStoreNames.contains(store)) db.deleteObjectStore(store);
-      db.createObjectStore(BOOKS, { keyPath: "book_id" });
-      const files = db.createObjectStore(FILES, { keyPath: "key" });
-      files.createIndex("storage_id", "storage_id", { unique: false });
-      db.createObjectStore(IMPORTS, { keyPath: "storage_id" });
+      // Never rebuild existing stores during an upgrade: an iOS app update must
+      // preserve already imported private books and their audio assets.
+      if (!db.objectStoreNames.contains(BOOKS)) db.createObjectStore(BOOKS, { keyPath: "book_id" });
+      if (!db.objectStoreNames.contains(FILES)) {
+        const files = db.createObjectStore(FILES, { keyPath: "key" });
+        files.createIndex("storage_id", "storage_id", { unique: false });
+      }
+      if (!db.objectStoreNames.contains(IMPORTS)) db.createObjectStore(IMPORTS, { keyPath: "storage_id" });
       if (!db.objectStoreNames.contains(POSITIONS)) db.createObjectStore(POSITIONS, { keyPath: "book_id" });
+      if (!db.objectStoreNames.contains(SETTINGS)) db.createObjectStore(SETTINGS, { keyPath: "key" });
     };
     pending.onsuccess = () => resolve(pending.result);
     pending.onerror = () => reject(pending.error);
@@ -113,6 +123,16 @@ export async function verifyLocalBook(record: LocalBookRecord) {
 }
 export async function loadPosition(bookId: BookId): Promise<ReaderPosition | undefined> { return transaction(POSITIONS, "readonly", (store) => store.get(bookId)); }
 export async function savePosition(position: ReaderPosition): Promise<void> { await transaction(POSITIONS, "readwrite", (store) => store.put(position)); }
+export async function listPositions(): Promise<ReaderPosition[]> { return transaction(POSITIONS, "readonly", (store) => store.getAll()) as Promise<ReaderPosition[]>; }
+
+export async function loadLastOpenedBookId(): Promise<BookId | undefined> {
+  const value = await transaction(SETTINGS, "readonly", (store) => store.get("last-opened-book")) as { value?: BookId } | undefined;
+  return value?.value;
+}
+
+export async function saveLastOpenedBookId(bookId: BookId | undefined): Promise<void> {
+  await transaction(SETTINGS, "readwrite", (store) => store.put({ key: "last-opened-book", value: bookId }));
+}
 
 export async function deleteLocalBook(bookId: BookId): Promise<void> {
   const book = await getBook(bookId);
