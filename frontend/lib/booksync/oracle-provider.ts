@@ -7,6 +7,7 @@ const MANIFEST_LIMIT_BYTES = 8 * 1024 ** 2;
 const MAX_CATALOG_BOOKS = 2_000;
 
 export interface OracleLibraryConfig {
+  kind: "oracle";
   id: string;
   name: string;
   catalog_url: string;
@@ -19,7 +20,7 @@ export interface OracleCatalogBook {
 }
 
 export interface OracleLibraryCatalog {
-  format: "booksync-oracle-library";
+  format: "booksync-library" | "booksync-oracle-library";
   schema_version: 1;
   name?: string;
   books: OracleCatalogBook[];
@@ -75,7 +76,7 @@ async function readBounded(response: Response, limit: number, label: string) {
 function validateCatalog(value: unknown): OracleLibraryCatalog {
   if (!value || typeof value !== "object") throw new Error("Oracle library.json must be a JSON object.");
   const candidate = value as Partial<OracleLibraryCatalog>;
-  if (candidate.format !== "booksync-oracle-library" || candidate.schema_version !== 1 || !Array.isArray(candidate.books)) throw new Error("Unsupported Oracle library catalog format.");
+  if (!(["booksync-library", "booksync-oracle-library"] as unknown[]).includes(candidate.format) || candidate.schema_version !== 1 || !Array.isArray(candidate.books)) throw new Error("Unsupported BookSync library catalog format.");
   if (candidate.books.length > MAX_CATALOG_BOOKS) throw new Error(`Oracle library catalog contains more than ${MAX_CATALOG_BOOKS} books.`);
   const paths = new Set<string>();
   const books = candidate.books.map((item) => {
@@ -87,7 +88,7 @@ function validateCatalog(value: unknown): OracleLibraryCatalog {
     paths.add(canonical);
     return { manifest_path: manifestPath };
   });
-  return { format: "booksync-oracle-library", schema_version: 1, name: typeof candidate.name === "string" ? candidate.name : undefined, books };
+  return { format: candidate.format as OracleLibraryCatalog["format"], schema_version: 1, name: typeof candidate.name === "string" ? candidate.name : undefined, books };
 }
 
 async function providerId(catalogUrl: string) {
@@ -97,7 +98,7 @@ async function providerId(catalogUrl: string) {
 
 export async function oracleConfigFromUrl(input: string): Promise<OracleLibraryConfig> {
   const endpoint = parseOracleLibraryEndpoint(input);
-  return { id: await providerId(endpoint.catalog_url), name: "Oracle Library", ...endpoint, connected_at: new Date().toISOString() };
+  return { kind: "oracle", id: await providerId(endpoint.catalog_url), name: "Oracle Library", ...endpoint, connected_at: new Date().toISOString() };
 }
 
 export class OracleStorageProvider implements StorageProvider {

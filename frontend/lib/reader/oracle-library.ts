@@ -1,5 +1,6 @@
 import type { BookSyncAudioAsset, BookSyncManifest, RelativePackagePath } from "../booksync/types";
 import { OracleStorageProvider, oracleConfigFromUrl, type OracleLibraryConfig } from "../booksync/oracle-provider";
+import { HuggingFaceStorageProvider, huggingFaceConfig, type HuggingFaceLibraryConfig } from "../booksync/huggingface-provider";
 import { declaredFiles, normalizePackagePath, validateDeclaredBlob, validateOverlay } from "./validation";
 import { planRoundRobinEviction, REMOTE_CACHE_LIMIT_BYTES } from "./remote-cache-policy";
 
@@ -24,6 +25,13 @@ export interface OracleBookRecord {
   manifest_path: RelativePackagePath;
   object_root: RelativePackagePath | "";
 }
+
+export interface HuggingFaceBookRecord extends Omit<OracleBookRecord, "source"> {
+  source: "huggingface";
+}
+
+export type RemoteBookRecord = OracleBookRecord | HuggingFaceBookRecord;
+export type RemoteLibraryConfig = OracleLibraryConfig | HuggingFaceLibraryConfig;
 
 export interface OracleCacheStats {
   bytes: number;
@@ -90,24 +98,53 @@ async function simpleTransaction<T>(store: string, mode: IDBTransactionMode, act
 }
 
 function recordId(providerId: string, bookId: string) { return `${providerId}:${bookId}`; }
-function cacheKey(record: OracleBookRecord, path: RelativePackagePath) { return `${record.provider_id}:${record.book_id}:${path}`; }
+function cacheKey(record: RemoteBookRecord, path: RelativePackagePath) { return `${record.provider_id}:${record.book_id}:${path}`; }
 
 export async function listOracleBooks(): Promise<OracleBookRecord[]> {
-  const values = await simpleTransaction(BOOKS, "readonly", (store) => store.getAll()) as OracleBookRecord[];
-  return values.filter((book) => book.state === "ready").sort((a, b) => b.imported_at.localeCompare(a.imported_at));
+  return (await listRemoteBooks()).filter((book): book is OracleBookRecord => book.source === "oracle");
+}
+
+export async function listRemoteBooks(): Promise<RemoteBookRecord[]> {
+  const values = await simpleTransaction(BOOKS, "readonly", (store) => store.getAll()) as RemoteBookRecord[];
+  return values.filter((book) => book.state === "ready" && (book.source === "oracle" || book.source === "huggingface")).sort((a, b) => b.imported_at.localeCompare(a.imported_at));
 }
 
 export async function listOracleProviders(): Promise<OracleLibraryConfig[]> {
-  return simpleTransaction(PROVIDERS, "readonly", (store) => store.getAll()) as Promise<OracleLibraryConfig[]>;
+  const values = await listRemoteProviders();
+  return values.filter((provider): provider is OracleLibraryConfig => provider.kind === "oracle" || (!('kind' in provider) && 'catalog_url' in provider));
+}
+
+export async function listHuggingFaceProviders(): Promise<HuggingFaceLibraryConfig[]> {
+  const values = await listRemoteProviders();
+  return values.filter((provider): provider is HuggingFaceLibraryConfig => provider.kind === "huggingface");
+}
+
+export async function listRemoteProviders(): Promise<RemoteLibraryConfig[]> {
+  return simpleTransaction(PROVIDERS, "readonly", (store) => store.getAll()) as Promise<RemoteLibraryConfig[]>;
 }
 
 export async function connectOracleLibrary(input: string, signal?: AbortSignal) {
   const config = await oracleConfigFromUrl(input);
   const provider = new OracleStorageProvider(config);
   const discovered = await provider.discover(signal);
+  return saveDiscoveredLibrary(config, "oracle", discovered);
+}
+
+export async function connectHuggingFaceLibrary(repo: string, token: string, signal?: AbortSignal) {
+  const config = await huggingFaceConfig(repo, token);
+  const provider = new HuggingFaceStorageProvider(config);
+  const discovered = await provider.discover(signal);
+  return saveDiscoveredLibrary(config, "huggingface", discovered);
+}
+
+async function saveDiscoveredLibrary(
+  config: RemoteLibraryConfig,
+  source: RemoteBookRecord["source"],
+  discovered: Array<{ book_id: BookSyncManifest["book_id"]; manifest: BookSyncManifest; manifest_path: RelativePackagePath; object_root: RelativePackagePath | "" }>,
+) {
   const connectedAt = new Date().toISOString();
-  const records: OracleBookRecord[] = discovered.map((book) => ({
-    record_id: recordId(config.id, book.book_id), source: "oracle", book_id: book.book_id, manifest: book.manifest,
+  const records: RemoteBookRecord[] = discovered.map((book) => ({
+    record_id: recordId(config.id, book.book_id), source, book_id: book.book_id, manifest: book.manifest,
     imported_at: connectedAt, size: [...declaredFiles(book.manifest).values()].reduce((sum, asset) => sum + asset.byte_length, 0),
     storage_id: config.id, state: "ready", provider_id: config.id, manifest_path: book.manifest_path, object_root: book.object_root,
   }));
@@ -136,6 +173,10 @@ async function deleteByIndex(store: IDBObjectStore, indexName: string, value: st
 }
 
 export async function disconnectOracleLibrary(providerId: string) {
+  return disconnectRemoteLibrary(providerId);
+}
+
+export async function disconnectRemoteLibrary(providerId: string) {
   const db = await openDatabase();
   try {
     const tx = db.transaction([PROVIDERS, BOOKS, CACHE], "readwrite");
@@ -148,7 +189,7 @@ export async function disconnectOracleLibrary(providerId: string) {
   } finally { db.close(); }
 }
 
-export async function removeOracleBook(record: OracleBookRecord) {
+export async function removeOracleBook(record: RemoteBookRecord) {
   const db = await openDatabase();
   try {
     const tx = db.transaction([BOOKS, CACHE], "readwrite");
@@ -166,17 +207,19 @@ export async function removeOracleBook(record: OracleBookRecord) {
   } finally { db.close(); }
 }
 
-async function providerFor(record: OracleBookRecord) {
-  const config = await simpleTransaction(PROVIDERS, "readonly", (store) => store.get(record.provider_id)) as OracleLibraryConfig | undefined;
-  if (!config) throw new Error("This Oracle library is disconnected. Connect it again from the Library screen.");
-  return new OracleStorageProvider(config);
+async function providerFor(record: RemoteBookRecord) {
+  const config = await simpleTransaction(PROVIDERS, "readonly", (store) => store.get(record.provider_id)) as RemoteLibraryConfig | undefined;
+  if (!config) throw new Error("This remote library is disconnected. Connect it again from the Library screen.");
+  return record.source === "huggingface"
+    ? new HuggingFaceStorageProvider(config as HuggingFaceLibraryConfig)
+    : new OracleStorageProvider(config as OracleLibraryConfig);
 }
 
-async function getCached(record: OracleBookRecord, path: RelativePackagePath) {
+async function getCached(record: RemoteBookRecord, path: RelativePackagePath) {
   return simpleTransaction(CACHE, "readonly", (store) => store.get(cacheKey(record, path))) as Promise<CacheRecord | undefined>;
 }
 
-async function putCached(record: OracleBookRecord, path: RelativePackagePath, blob: Blob) {
+async function putCached(record: RemoteBookRecord, path: RelativePackagePath, blob: Blob) {
   if (blob.size > REMOTE_CACHE_LIMIT_BYTES) return false;
   const db = await openDatabase();
   try {
@@ -199,9 +242,8 @@ async function putCached(record: OracleBookRecord, path: RelativePackagePath, bl
   } finally { db.close(); }
 }
 
-async function fetchDeclaredBlob(url: string, expectedBytes: number, mediaType: string, signal?: AbortSignal) {
-  const response = await fetch(url, { signal, cache: "no-store" });
-  if (!response.ok) throw new Error(`Oracle object request failed (${response.status}). Check the pre-authenticated URL and CORS policy.`);
+async function fetchDeclaredBlob(response: Response, expectedBytes: number, mediaType: string, label: string) {
+  if (!response.ok) throw new Error(`${label} object request failed (${response.status}). Check the connection, permissions, and CORS policy.`);
   const contentLength = Number(response.headers.get("content-length") || 0);
   if (contentLength && contentLength !== expectedBytes) throw new Error("Oracle object size does not match the BookSync manifest.");
   if (!response.body) {
@@ -223,29 +265,32 @@ async function fetchDeclaredBlob(url: string, expectedBytes: number, mediaType: 
   return new Blob(chunks as BlobPart[], { type: mediaType });
 }
 
-export async function readOraclePackageFile(record: OracleBookRecord, path: RelativePackagePath, signal?: AbortSignal) {
+export async function readOraclePackageFile(record: RemoteBookRecord, path: RelativePackagePath, signal?: AbortSignal) {
   const safePath = normalizePackagePath(path);
   const cached = await getCached(record, safePath);
   if (cached) return cached.blob;
   const asset = declaredFiles(record.manifest).get(safePath);
-  if (!asset) throw new Error(`Oracle package does not declare ${safePath}.`);
+  if (!asset) throw new Error(`Remote package does not declare ${safePath}.`);
   const provider = await providerFor(record);
-  const url = provider.objectUrl(record.book_id, record.object_root, safePath);
-  const blob = await fetchDeclaredBlob(url, asset.byte_length, asset.media_type, signal);
+  const response = record.source === "huggingface"
+    ? await (provider as HuggingFaceStorageProvider).fetchPath(`${record.object_root}${safePath}` as RelativePackagePath, signal)
+    : await fetch((provider as OracleStorageProvider).objectUrl(record.book_id, record.object_root, safePath), { signal, cache: "no-store" });
+  const blob = await fetchDeclaredBlob(response, asset.byte_length, asset.media_type, record.source === "huggingface" ? "Hugging Face" : "Oracle");
   await validateDeclaredBlob(asset, blob);
   if (safePath.startsWith("overlays/")) await validateOverlay(JSON.parse(await blob.text()), record.manifest, safePath);
   await putCached(record, safePath, blob);
   return blob;
 }
 
-export async function oraclePlayableAudio(record: OracleBookRecord, asset: BookSyncAudioAsset) {
+export async function oraclePlayableAudio(record: RemoteBookRecord, asset: BookSyncAudioAsset) {
   const cached = await getCached(record, asset.path);
   if (cached) return { kind: "blob" as const, blob: cached.blob, cached: true };
+  if (record.source === "huggingface") return { kind: "blob" as const, blob: await readOraclePackageFile(record, asset.path), cached: false };
   const provider = await providerFor(record);
-  return { kind: "remote" as const, url: provider.objectUrl(record.book_id, record.object_root, asset.path), cached: false };
+  return { kind: "remote" as const, url: (provider as OracleStorageProvider).objectUrl(record.book_id, record.object_root, asset.path), cached: false };
 }
 
-export async function prefetchOracleAudio(record: OracleBookRecord, asset: BookSyncAudioAsset, signal?: AbortSignal) {
+export async function prefetchOracleAudio(record: RemoteBookRecord, asset: BookSyncAudioAsset, signal?: AbortSignal) {
   if (asset.byte_length > REMOTE_CACHE_LIMIT_BYTES) return;
   if (await getCached(record, asset.path)) return;
   await readOraclePackageFile(record, asset.path, signal);

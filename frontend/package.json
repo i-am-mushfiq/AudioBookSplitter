@@ -12,7 +12,7 @@
     "test": "npm run build && node --test tests/reader-hardening.test.mjs",
     "test:hardening": "node --test tests/reader-hardening.test.mjs",
     "mobile:dev": "vite --config mobile/vite.config.ts",
-    "mobile:build": "vite build --config mobile/vite.config.ts",
+    "mobile:build": "vite build --config mobile/vite.config.ts --configLoader runner",
     "mobile:sync": "npm run mobile:build && cap sync",
     "android:apk": "npm run mobile:sync && cd android && gradlew.bat assembleDebug",
     "ios:sync": "npm run mobile:sync && cap sync ios",

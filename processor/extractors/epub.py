@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import posixpath
+import re
 import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
@@ -102,6 +103,11 @@ def clean_paragraphs(paragraphs: list[str]) -> list[str]:
     return cleaned
 
 
+def clean_document_text(text: str) -> str:
+    marker = re.search(r"(?i)(?:^|\s)(?:\*{3}\s*)?(?:the end|end of the project gutenberg ebook)(?=\s|$)", text)
+    return text[: marker.start()].strip() if marker else text.strip()
+
+
 def extract_epub(epub_path: Path) -> ExtractedBook:
     """Read EPUB spine documents in publication order."""
     with zipfile.ZipFile(epub_path) as archive:
@@ -137,7 +143,19 @@ def extract_epub(epub_path: Path) -> ExtractedBook:
             parser.feed(source)
             parser.close()
             paragraphs = clean_paragraphs(parser.paragraphs)
-            text = " ".join(paragraphs).strip() or parser.text
+            paragraph_text = " ".join(paragraphs).strip()
+            document_text = clean_document_text(parser.text)
+            # Some valid EPUBs (notably Calibre conversions) place most prose in
+            # styled div elements while retaining a few h1/p elements. Using the
+            # partial block list in that case silently drops nearly the whole book.
+            # Fall back to the complete visible document text when block coverage
+            # is clearly incomplete; a single canonical paragraph is preferable to
+            # losing narration text and sentence alignment.
+            if document_text and len(paragraph_text) < len(document_text) * 0.6:
+                text = document_text
+                paragraphs = [text]
+            else:
+                text = paragraph_text or document_text
             if not text:
                 continue
             chapter_title = (parser.heading or parser.title or f"Section {spine_index}").strip()

@@ -8,11 +8,19 @@ import { createServer } from "vite";
 
 globalThis.crypto ??= webcrypto;
 const root = resolve(import.meta.dirname, "..");
-const vite = await createServer({ root, configFile: false, appType: "custom", server: { middlewareMode: true } });
+const vite = await createServer({
+  root,
+  configFile: false,
+  cacheDir: resolve(root, ".vite-hardening-cache"),
+  optimizeDeps: { noDiscovery: true, include: [] },
+  appType: "custom",
+  server: { middlewareMode: true },
+});
 after(() => vite.close());
 const validation = await vite.ssrLoadModule("/lib/reader/validation.ts");
 const content = await vite.ssrLoadModule("/lib/reader/content.ts");
 const oracle = await vite.ssrLoadModule("/lib/booksync/oracle-provider.ts");
+const huggingFace = await vite.ssrLoadModule("/lib/booksync/huggingface-provider.ts");
 const cachePolicy = await vite.ssrLoadModule("/lib/reader/remote-cache-policy.ts");
 const fixtureRoot = resolve(root, "..", "examples", "minimal.booksync");
 
@@ -122,6 +130,39 @@ test("discovers an Oracle book through the catalog without listing the bucket", 
     assert.equal(books.length, 1);
     assert.equal(books[0].title, "Synthetic Contract Fixture");
     assert.deepEqual(requests, ["https://objects.example/library.json", "https://objects.example/Synthetic.booksync/manifest.json"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("builds authenticated, traversal-safe Hugging Face dataset URLs", () => {
+  assert.equal(huggingFace.parseHuggingFaceRepo("https://huggingface.co/datasets/mdrahman/booksync-library/tree/main"), "mdrahman/booksync-library");
+  assert.equal(huggingFace.resolveHuggingFaceFileUrl("mdrahman/booksync-library", "main", "My Book.booksync/audio/part 01.mp3"), "https://huggingface.co/datasets/mdrahman/booksync-library/resolve/main/My%20Book.booksync/audio/part%2001.mp3?download=true");
+  assert.throws(() => huggingFace.parseHuggingFaceRepo("https://example.com/datasets/me/books"), /huggingface\.co/);
+  assert.throws(() => huggingFace.resolveHuggingFaceFileUrl("mdrahman/booksync-library", "main", "../token.txt"), /Unsafe package path/);
+});
+
+test("discovers a private Hugging Face book with bearer auth and supports ranges", async () => {
+  const manifestText = await readFile(resolve(fixtureRoot, "manifest.json"), "utf8");
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    requests.push({ url, authorization: new Headers(init.headers).get("authorization"), range: new Headers(init.headers).get("range") });
+    if (url.includes("library.json")) return new Response(JSON.stringify({ format: "booksync-library", schema_version: 1, books: [{ manifest_path: "Synthetic.booksync/manifest.json" }] }));
+    if (url.includes("manifest.json")) return new Response(manifestText);
+    if (url.includes("audio/audio-0001.mp3")) return new Response(new Uint8Array([1, 2, 3, 4]), { status: 206 });
+    return new Response("missing", { status: 404 });
+  };
+  try {
+    const provider = new huggingFace.HuggingFaceStorageProvider({ kind: "huggingface", id: "huggingface_test", name: "Test", repo_id: "mdrahman/booksync-library", revision: "main", token: "private-test-token", connected_at: new Date(0).toISOString() });
+    const books = await provider.discover();
+    assert.equal(books[0].title, "Synthetic Contract Fixture");
+    const bytes = await provider.readRange(books[0].book_id, "audio/audio-0001.mp3", { start: 10, end_exclusive: 14 });
+    assert.deepEqual([...new Uint8Array(bytes)], [1, 2, 3, 4]);
+    assert.ok(requests.every((request) => request.authorization === "Bearer private-test-token"));
+    assert.equal(requests.at(-1).range, "bytes=10-13");
+    assert.ok(requests.every((request) => !request.url.includes("private-test-token")));
   } finally {
     globalThis.fetch = originalFetch;
   }

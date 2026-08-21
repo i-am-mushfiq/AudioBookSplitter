@@ -456,9 +456,10 @@ Planned providers:
 
 1. `LocalStorageProvider`
 2. `OracleStorageProvider` — read-only streaming MVP implemented
-3. `GoogleDriveProvider`
-4. `TelegramProvider`
-5. `WebDavProvider`
+3. `HuggingFaceStorageProvider` — private dataset discovery and authenticated session playback implemented
+4. `GoogleDriveProvider`
+5. `TelegramProvider`
+6. `WebDavProvider`
 
 ### Cache policy
 

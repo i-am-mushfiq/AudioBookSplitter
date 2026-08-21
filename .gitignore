@@ -1,5 +1,6 @@
 .venv/
 __pycache__/
+.vite-hardening-cache/
 output/
 .chapter-cut-jobs/
 frontend/*.log
@@ -21,3 +22,4 @@ test1-output/
 test1/
 test2-output/
 test2/
+To-be-done/

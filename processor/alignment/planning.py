@@ -100,7 +100,7 @@ def build_processing_plan(
     cuts: list[Cut] = []
     target = minutes * 60
     chunk_number = 1
-    for chapter_range in chapter_ranges:
+    for chapter_ordinal, chapter_range in enumerate(chapter_ranges, 1):
         chapter_duration = chapter_range.end - chapter_range.start
         desired_boundaries: list[float] = []
         if mode == "smart" and chapter_duration > target + 45:
@@ -132,7 +132,7 @@ def build_processing_plan(
                     1,
                     reason,
                     "",
-                    chapter_range.chapter.number,
+                    str(chapter_ordinal),
                     chapter_range.chapter.title,
                     part,
                 )
@@ -149,7 +149,7 @@ def build_processing_plan(
                 1,
                 "chapter boundary" if chapter_range.end < duration else "final chunk",
                 "",
-                chapter_range.chapter.number,
+                str(chapter_ordinal),
                 chapter_range.chapter.title,
                 part,
             )

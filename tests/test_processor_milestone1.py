@@ -9,6 +9,7 @@ from pathlib import Path
 from processor.alignment.backends import TranscriptSequenceAlignmentBackend
 from processor.alignment.planning import build_processing_plan, select_narrated_chapters
 from processor.extractors import extract_book
+from processor.extractors.epub import EpubTextParser
 from processor.models import Chapter, ChapterRange, Cut, ExtractedBook, ProcessingPlan, Word
 from processor.packaging import build_booksync_package
 from processor.text import norm, split_sentences
@@ -46,6 +47,29 @@ class MilestoneOneProcessorTests(unittest.TestCase):
         )
         selected = select_narrated_chapters(book)
         self.assertEqual([chapter.title for chapter in selected], ["Chapter One", "Chapter Two"])
+
+    def test_div_based_epub_prose_is_not_dropped_by_sparse_block_markup(self) -> None:
+        parser = EpubTextParser()
+        parser.feed("<html><head><title>Book</title></head><body><h1>Chapter One</h1><div>" + ("Narrated prose sentence. " * 20) + "</div></body></html>")
+        parser.close()
+        paragraph_text = " ".join(parser.paragraphs)
+        self.assertGreater(len(parser.text), len(paragraph_text) * 4)
+
+    def test_output_chapter_numbers_are_sequential_after_front_matter(self) -> None:
+        chapters = [
+            Chapter("1", "Cover", 1, "Cover"),
+            Chapter("7", "Chapter One", 7, "Chapter One begins with enough matching words here."),
+            Chapter("8", "Chapter Two", 8, "Chapter Two begins with enough matching words here."),
+        ]
+        book = ExtractedBook("epub", [], chapters, "Synthetic", None)
+        words = [
+            Word("Chapter", 0.0, 0.2), Word("One", 0.2, 0.4), Word("begins", 0.4, 0.6),
+            Word("with", 0.6, 0.8), Word("enough", 0.8, 1.0), Word("matching", 1.0, 1.2), Word("words", 1.2, 1.4), Word("here.", 1.4, 1.6),
+            Word("Chapter", 100.0, 100.2), Word("Two", 100.2, 100.4), Word("begins", 100.4, 100.6),
+            Word("with", 100.6, 100.8), Word("enough", 100.8, 101.0), Word("matching", 101.0, 101.2), Word("words", 101.2, 101.4), Word("here.", 101.4, 101.6),
+        ]
+        plan = build_processing_plan(book, words, "Synthetic", 200.0, 10.0, "smart")
+        self.assertEqual([cut.chapter_number for cut in plan.cuts], ["1", "2"])
 
     def test_package_builder_emits_a_valid_booksync_package(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

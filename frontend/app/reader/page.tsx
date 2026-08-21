@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } fr
 import type { BookSyncOverlay, BookSyncOverlayEntry } from "../../lib/booksync/types";
 import { activeEntry, activeWordIndex, formatClock, loadedAudioAsset, logicalTimeForAudioAsset, nextAudioAsset, safeChapterMarkup, sessionTransitionSentenceIds } from "../../lib/reader/content";
 import { importBookSyncZip, listPositions, loadHighlights, loadLastOpenedBookId, loadPosition, saveHighlights, saveLastOpenedBookId, savePosition, type ImportProgress, type ReaderHighlight, type ReaderPosition } from "../../lib/reader/library";
-import { connectOracleLibrary, disconnectOracleLibrary, getOracleCacheStats, listOracleProviders, type OracleCacheStats } from "../../lib/reader/oracle-library";
-import { isOracleBook, listReaderBooks, playableAudio, prefetchAudio, readReaderFile, readReaderText, removeReaderBook, verifyReaderBook, type ReaderBookRecord } from "../../lib/reader/sources";
+import { connectHuggingFaceLibrary, connectOracleLibrary, disconnectRemoteLibrary, getOracleCacheStats, listHuggingFaceProviders, listOracleProviders, type OracleCacheStats } from "../../lib/reader/oracle-library";
+import { isHuggingFaceBook, isOracleBook, isRemoteBook, listReaderBooks, playableAudio, prefetchAudio, readReaderFile, readReaderText, removeReaderBook, verifyReaderBook, type ReaderBookRecord } from "../../lib/reader/sources";
 import "./reader.css";
 import "./highlight.css";
 import "./reader-progress.css";
@@ -43,6 +43,11 @@ export default function ReaderPage() {
   const [oracleUrl, setOracleUrl] = useState("");
   const [connectingOracle, setConnectingOracle] = useState(false);
   const [oracleProviders, setOracleProviders] = useState<Awaited<ReturnType<typeof listOracleProviders>>>([]);
+  const [huggingFaceOpen, setHuggingFaceOpen] = useState(false);
+  const [huggingFaceRepo, setHuggingFaceRepo] = useState("");
+  const [huggingFaceToken, setHuggingFaceToken] = useState("");
+  const [connectingHuggingFace, setConnectingHuggingFace] = useState(false);
+  const [huggingFaceProviders, setHuggingFaceProviders] = useState<Awaited<ReturnType<typeof listHuggingFaceProviders>>>([]);
   const [oracleCache, setOracleCache] = useState<OracleCacheStats>({ bytes: 0, entries: 0, limit_bytes: Math.floor(1.5 * 1024 ** 3) });
   const [storagePersistent, setStoragePersistent] = useState<boolean>();
   const [error, setError] = useState("");
@@ -74,10 +79,11 @@ export default function ReaderPage() {
   } : undefined;
 
   const refreshLibrary = useCallback(async () => {
-    const [books, savedPositions, providers, cache] = await Promise.all([listReaderBooks(), listPositions(), listOracleProviders(), getOracleCacheStats()]);
+    const [books, savedPositions, providers, huggingFace, cache] = await Promise.all([listReaderBooks(), listPositions(), listOracleProviders(), listHuggingFaceProviders(), getOracleCacheStats()]);
     setLibrary(books);
     setPositions(Object.fromEntries(savedPositions.map((position) => [position.book_id, position])));
     setOracleProviders(providers);
+    setHuggingFaceProviders(huggingFace);
     setOracleCache(cache);
     return books;
   }, []);
@@ -360,11 +366,22 @@ export default function ReaderPage() {
   }
 
   async function disconnectOracle(providerId: string) {
-    await disconnectOracleLibrary(providerId);
-    if (book && isOracleBook(book) && book.provider_id === providerId) {
+    await disconnectRemoteLibrary(providerId);
+    if (book && isRemoteBook(book) && book.provider_id === providerId) {
       audioRef.current?.pause(); setBook(undefined); setSurface("library"); setPlaying(false);
     }
     await refreshLibrary();
+  }
+
+  async function connectHuggingFace() {
+    if (!huggingFaceRepo.trim() || !huggingFaceToken.trim()) return;
+    setConnectingHuggingFace(true); setError("");
+    try {
+      await connectHuggingFaceLibrary(huggingFaceRepo.trim(), huggingFaceToken.trim());
+      await refreshLibrary();
+      setHuggingFaceToken(""); setHuggingFaceOpen(false);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not connect the Hugging Face library."); }
+    finally { setConnectingHuggingFace(false); }
   }
 
   const importLabel = importProgress ? `${importProgress.phase.replace("-", " ")} ${importProgress.total ? Math.min(100, Math.round(importProgress.completed / importProgress.total * 100)) : 0}%` : "Importing…";
@@ -434,6 +451,7 @@ export default function ReaderPage() {
         <div><span>BOOKSYNC READER</span><h1>Library</h1></div>
         <div className="library-actions">
           <button className="reader-cloud" aria-label="Connect Oracle library" onClick={() => setOracleOpen(true)}><b aria-hidden="true">☁</b><span>Oracle</span></button>
+          <button className="reader-cloud" aria-label="Connect Hugging Face library" onClick={() => setHuggingFaceOpen(true)}><b aria-hidden="true">HF</b><span>Hugging Face</span></button>
           {importing ? <button className="reader-cancel" onClick={() => importController.current?.abort()}>{importLabel} · Cancel</button> : <button className="reader-import" aria-label="Import BookSync ZIP" onClick={() => fileInputRef.current?.click()}><b aria-hidden="true">＋</b><span>Import book</span></button>}
         </div>
       </header>
@@ -448,13 +466,13 @@ export default function ReaderPage() {
         const progress = positions[item.book_id];
         const percent = Math.min(100, Math.round((progress?.furthest_global_ms ?? progress?.global_ms ?? 0) / item.manifest.total_duration_ms * 100));
         return <article className="library-row" key={item.book_id}>
-          <button className="library-open-book" onClick={() => void openBook(item)}>{artwork(item)}<span className="library-book-copy"><strong>{item.manifest.title}</strong><small>{item.manifest.author || "Unknown author"}</small><em>{item.manifest.chapters.length} chapters · {formatClock(item.manifest.total_duration_ms)} · {isOracleBook(item) ? "Oracle stream" : "Offline"}</em><i><span style={{ width: `${percent}%` }} /></i><b>{percent}% complete</b></span><span className="row-arrow">›</span></button>
-          <button className="book-delete" title={isOracleBook(item) ? "Hide this Oracle book and release its cache" : "Remove from this device"} aria-label={`Remove ${item.manifest.title}`} onClick={() => void removeBook(item)}>×</button>
+          <button className="library-open-book" onClick={() => void openBook(item)}>{artwork(item)}<span className="library-book-copy"><strong>{item.manifest.title}</strong><small>{item.manifest.author || "Unknown author"}</small><em>{item.manifest.chapters.length} chapters · {formatClock(item.manifest.total_duration_ms)} · {isHuggingFaceBook(item) ? "Hugging Face" : isOracleBook(item) ? "Oracle stream" : "Offline"}</em><i><span style={{ width: `${percent}%` }} /></i><b>{percent}% complete</b></span><span className="row-arrow">›</span></button>
+          <button className="book-delete" title={isRemoteBook(item) ? "Hide this remote book and release its cache" : "Remove from this device"} aria-label={`Remove ${item.manifest.title}`} onClick={() => void removeBook(item)}>×</button>
         </article>;
-      }) : <div className="library-empty"><b>Bring your first book.</b><span>Import a BookSync ZIP for offline reading or connect an Oracle library to stream session by session.</span></div>}
+      }) : <div className="library-empty"><b>Bring your first book.</b><span>Import a BookSync ZIP for offline reading, or connect Oracle or a private Hugging Face dataset for session-based listening.</span></div>}
       </div>
-      <p className="storage-state">Oracle cache {formatBytes(oracleCache.bytes)} of {formatBytes(oracleCache.limit_bytes)} · {oracleCache.entries} files. Oldest sessions are released first. {storagePersistent ? "Local books use persistent device storage." : "iOS may still reclaim device data under critical pressure."}</p>
-      {error && !oracleOpen && <p className="reader-error library-error">{error}</p>}
+      <p className="storage-state">Remote cache {formatBytes(oracleCache.bytes)} of {formatBytes(oracleCache.limit_bytes)} · {oracleCache.entries} files. Oldest sessions are released first. {storagePersistent ? "Local books use persistent device storage." : "iOS may still reclaim device data under critical pressure."}</p>
+      {error && !oracleOpen && !huggingFaceOpen && <p className="reader-error library-error">{error}</p>}
       {book && <button className="library-mini-player" onClick={() => setSurface("reader")}>{artwork(book)}<span><small>{playing ? "NOW PLAYING" : "READY TO RESUME"}</small><strong>{book.manifest.title}</strong></span><b>Open&nbsp;›</b></button>}
     </section> : manifest && chapter ? <>
       <section className={`reader-stage ${highlightMode ? "highlight-mode" : ""}`} onClick={handleReaderTap}>
@@ -479,6 +497,7 @@ export default function ReaderPage() {
       {speedOpen && <div className="sheet-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSpeedOpen(false); }}><section className="reader-sheet speed-sheet" role="dialog" aria-modal="true" aria-labelledby="speed-title"><header><button onClick={() => setSpeedOpen(false)} aria-label="Close speed controls">×</button><h2 id="speed-title">Playback speed</h2><span /></header><p>Choose a comfortable narration speed.</p><div className="speed-options">{[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5].map((value) => <button key={value} className={rate === value ? "active" : ""} onClick={() => { setRate(value); if (audioRef.current) audioRef.current.playbackRate = value; setSpeedOpen(false); }} aria-pressed={rate === value}>{value}×{rate === value && <span>✓</span>}</button>)}</div></section></div>}
     </> : null}
     {oracleOpen && <div className="sheet-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !connectingOracle) setOracleOpen(false); }}><section className="reader-sheet oracle-sheet" role="dialog" aria-modal="true" aria-labelledby="oracle-title"><header><button onClick={() => setOracleOpen(false)} aria-label="Close Oracle connection">×</button><h2 id="oracle-title">Oracle library</h2><span /></header><div className="oracle-connect"><p>Paste an HTTPS Oracle Object Storage bucket, prefix PAR, or full <code>library.json</code> URL. BookSync loads manifests first and streams only the session you play.</p><label><span>Library URL</span><input type="url" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="https://objectstorage…/o/library.json" value={oracleUrl} onChange={(event) => setOracleUrl(event.target.value)} /></label><button disabled={connectingOracle || !oracleUrl.trim()} onClick={() => void connectOracle()}>{connectingOracle ? "Checking library…" : "Connect Oracle"}</button>{error && <p className="reader-error">{error}</p>}<small>The URL is stored only on this device. A private pre-authenticated URL is a bearer secret—do not share it.</small></div>{oracleProviders.length > 0 && <div className="oracle-providers"><h3>Connected</h3>{oracleProviders.map((provider) => <div key={provider.id}><span><b>{provider.name}</b><small>{new URL(provider.catalog_url).hostname}</small></span><button onClick={() => void disconnectOracle(provider.id)}>Disconnect</button></div>)}</div>}<div className="oracle-cache-note"><b>{formatBytes(oracleCache.bytes)} cached</b><span>Hard limit: {formatBytes(oracleCache.limit_bytes)}. BookSync uses round-robin eviction and never prefetches a complete book.</span></div></section></div>}
+    {huggingFaceOpen && <div className="sheet-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !connectingHuggingFace) setHuggingFaceOpen(false); }}><section className="reader-sheet oracle-sheet" role="dialog" aria-modal="true" aria-labelledby="huggingface-title"><header><button onClick={() => setHuggingFaceOpen(false)} aria-label="Close Hugging Face connection">×</button><h2 id="huggingface-title">Hugging Face library</h2><span /></header><div className="oracle-connect"><p>Connect a private Hugging Face dataset containing expanded BookSync packages and a root <code>library.json</code>. Only the current session and the next prefetched session are downloaded.</p><label><span>Dataset</span><input type="text" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="owner/booksync-library" value={huggingFaceRepo} onChange={(event) => setHuggingFaceRepo(event.target.value)} /></label><label><span>Read token</span><input type="password" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="off" placeholder="hf_…" value={huggingFaceToken} onChange={(event) => setHuggingFaceToken(event.target.value)} /></label><button disabled={connectingHuggingFace || !huggingFaceRepo.trim() || !huggingFaceToken.trim()} onClick={() => void connectHuggingFace()}>{connectingHuggingFace ? "Checking private library…" : "Connect Hugging Face"}</button>{error && <p className="reader-error">{error}</p>}<small>Use a fine-grained read-only token for this dataset. It is entered at runtime and stored only in this app's local database; it is never built into the IPA or BookSync files.</small></div>{huggingFaceProviders.length > 0 && <div className="oracle-providers"><h3>Connected</h3>{huggingFaceProviders.map((provider) => <div key={provider.id}><span><b>{provider.name}</b><small>{provider.repo_id}@{provider.revision}</small></span><button onClick={() => void disconnectOracle(provider.id)}>Disconnect</button></div>)}</div>}<div className="oracle-cache-note"><b>{formatBytes(oracleCache.bytes)} cached</b><span>Hard limit: {formatBytes(oracleCache.limit_bytes)}. Private audio is authenticated, checksum-validated, and played one session at a time.</span></div></section></div>}
     {error && manifest && <div className="reader-toast">{error}</div>}
   </main>;
 }

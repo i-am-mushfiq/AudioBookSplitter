@@ -91,6 +91,28 @@ oci os object bulk-upload `
 
 `BookSyncCloud` should contain the expanded `.booksync` directories produced next to each ZIP. Create an Oracle PAR with **object read** permission only; the URL is a bearer secret stored locally by the app. Detailed setup and cache behavior are in [docs/oracle-streaming.md](docs/oracle-streaming.md).
 
+## Streaming from a private Hugging Face dataset
+
+The iPhone/mobile reader can also connect directly to a private Hugging Face dataset. On the Library screen, select **Hugging Face**, enter the dataset as `owner/dataset`, and provide a fine-grained read-only token that can access it.
+
+For the current personal library:
+
+```text
+mdrahman/booksync-library
+```
+
+Private audio is fetched with bearer authentication, checked against the BookSync manifest, and played as a verified session blob. BookSync downloads the current session rather than the entire audiobook and prefetches only the next session. Oracle and Hugging Face share the same **1.5 GiB** round-robin cache ceiling.
+
+Publish a completed expanded package and update the remote catalog in one validated operation:
+
+```powershell
+python .\tools\publish_huggingface_package.py `
+  ".\output\My_Book.booksync" `
+  --repo mdrahman/booksync-library
+```
+
+The publisher refuses invalid packages, creates a separate automated quality scorecard, excludes ZIP/cache files, uploads the expanded package, merges `library.json`, and verifies the remote manifest. See [docs/huggingface-streaming.md](docs/huggingface-streaming.md) for token, privacy, cache, and testing details.
+
 ## Mobile apps
 
 Android and iPhone use the same reader bundle through Capacitor.
@@ -130,6 +152,8 @@ The iPhone project requires macOS/Xcode for a local signed build. See [frontend/
 - **Unsigned iPhone IPA:** downloads directly but cannot be installed on an iPhone. Apple signing is mandatory for device installation, TestFlight, or App Store distribution.
 - **Local iPhone storage:** the reader requests persistent storage, but iOS can still reclaim local data under severe storage pressure. Keep the original `.booksync.zip` so you can re-import it.
 - **Oracle MVP cache:** the 1.5 GiB cap applies to BookSync's managed remote cache, not deliberately imported offline ZIPs or WebKit's small transient networking buffers. Current-session write-through, resumable chunk caching, offline pinning, and network-aware prefetch remain planned work.
+- **Hugging Face token storage:** the token is entered at runtime and never embedded in the IPA or package, but the Capacitor web reader currently persists it in its app-local IndexedDB so the library survives relaunches. Use a fine-grained read-only token dedicated to this dataset; native Keychain storage remains a hardening improvement.
+- **Hugging Face session startup:** authenticated private media cannot be assigned to the audio element as an unauthenticated URL. The current session is downloaded and checksum-validated before playback begins, so first play may pause briefly on a slow connection. Whole books are not downloaded.
 - **Long audiobook processing:** transcription is intentionally windowed to avoid whole-book memory exhaustion. It can still take a long time, especially on CPU.
 - **Alignment quality:** the audiobook must match the edition closely. Different abridgements, translations, skipped introductions, or inaccurate source chapter headings can reduce alignment quality.
 - **PDF structure:** EPUB normally provides cleaner chapters than PDF. Scanned/image-only PDFs may need OCR or a better source file.
@@ -202,6 +226,7 @@ The output directory contains:
 - `<Book_Name>.booksync/`, the synchronized reader package;
 - `<Book_Name>.booksync.zip`, the portable package for the reader;
 - alignment quality and review reports.
+- a separate `*-scorecard.json` when `tools/score_booksync_package.py` or the Hugging Face publisher is run. The score is an automated structural heuristic, not a substitute for listening review.
 
 The package itself contains canonical content, audio, transcript, overlays, reports, source publication, manifest, and checksums:
 
