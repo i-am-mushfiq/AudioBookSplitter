@@ -9,6 +9,8 @@ import "./highlight.css";
 import "./reader-progress.css";
 
 type Theme = "paper" | "night" | "contrast";
+type ReaderSurface = "library" | "reader";
+type ContentsTab = "chapters" | "sessions";
 
 export default function ReaderPage() {
   const [library, setLibrary] = useState<LocalBookRecord[]>([]);
@@ -22,10 +24,15 @@ export default function ReaderPage() {
   const [furthestGlobalMs, setFurthestGlobalMs] = useState(0);
   const [completedChapterIds, setCompletedChapterIds] = useState<string[]>([]);
   const [positions, setPositions] = useState<Record<string, ReaderPosition>>({});
-  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [surface, setSurface] = useState<ReaderSurface>("library");
+  const [lastOpenedBookId, setLastOpenedBookId] = useState<string>();
+  const [contentsOpen, setContentsOpen] = useState(false);
+  const [contentsTab, setContentsTab] = useState<ContentsTab>("chapters");
+  const [speedOpen, setSpeedOpen] = useState(false);
+  const [coverUrls, setCoverUrls] = useState<Record<string, string>>({});
   const [follow, setFollow] = useState(true);
   const [theme, setTheme] = useState<Theme>("paper");
-  const [fontSize, setFontSize] = useState(20);
+  const [fontSize, setFontSize] = useState(23);
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportProgress>();
   const [storagePersistent, setStoragePersistent] = useState<boolean>();
@@ -38,6 +45,7 @@ export default function ReaderPage() {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const latestPosition = useRef<Parameters<typeof savePosition>[0] | undefined>(undefined);
   const importController = useRef<AbortController | undefined>(undefined);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const seekGeneration = useRef(0);
   const manifest = book?.manifest;
   const chapter = manifest?.chapters[chapterIndex];
@@ -65,13 +73,26 @@ export default function ReaderPage() {
     let active = true;
     void refreshLibrary().then(async (books) => {
       const lastBookId = await loadLastOpenedBookId();
-      const savedBook = books.find((item) => item.book_id === lastBookId);
-      if (active && savedBook) await openBook(savedBook);
+      if (active && books.some((item) => item.book_id === lastBookId)) setLastOpenedBookId(lastBookId);
     });
     return () => { active = false; };
-    // Initial restore is deliberately run once. openBook only updates local reader state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshLibrary]);
+  useEffect(() => {
+    let cancelled = false;
+    const created: string[] = [];
+    void Promise.all(library.map(async (record) => {
+      if (!record.manifest.cover) return undefined;
+      try {
+        const blob = await readPackageFile(record.book_id, record.manifest.cover.path);
+        const url = URL.createObjectURL(blob); created.push(url);
+        return [record.book_id, url] as const;
+      } catch { return undefined; }
+    })).then((items) => {
+      if (cancelled) { created.forEach((url) => URL.revokeObjectURL(url)); return; }
+      setCoverUrls(Object.fromEntries(items.filter((item): item is readonly [string, string] => Boolean(item))));
+    });
+    return () => { cancelled = true; created.forEach((url) => URL.revokeObjectURL(url)); };
+  }, [library]);
   useEffect(() => {
     void navigator.storage?.persist?.().then(setStoragePersistent).catch(() => undefined);
     void navigator.storage?.persisted?.().then(setStoragePersistent);
@@ -239,7 +260,12 @@ export default function ReaderPage() {
     setError("");
     try {
       await verifyLocalBook(record);
-      setBook(record); setMarkup(""); setEntries([]); setLibraryOpen(false);
+      audioRef.current?.pause();
+      if (audioUrl.current) URL.revokeObjectURL(audioUrl.current);
+      audioUrl.current = undefined; activeAssetId.current = undefined;
+      audioRef.current?.removeAttribute("src"); audioRef.current?.load();
+      setBook(record); setMarkup(""); setEntries([]); setSurface("reader"); setContentsOpen(false); setSpeedOpen(false);
+      setLastOpenedBookId(record.book_id);
       await saveLastOpenedBookId(record.book_id);
     }
     catch (caught) { setError(caught instanceof Error ? caught.message : "The local package is incomplete."); }
@@ -261,19 +287,14 @@ export default function ReaderPage() {
   async function removeBook(record: LocalBookRecord) {
     await deleteLocalBook(record.book_id);
     if (book?.book_id === record.book_id) {
-      setBook(undefined); setPlaying(false); audioRef.current?.pause();
+      setBook(undefined); setSurface("library"); setPlaying(false); audioRef.current?.pause();
       await saveLastOpenedBookId(undefined);
+      setLastOpenedBookId(undefined);
     }
     await refreshLibrary();
   }
 
   const importLabel = importProgress ? `${importProgress.phase.replace("-", " ")} ${importProgress.total ? Math.min(100, Math.round(importProgress.completed / importProgress.total * 100)) : 0}%` : "Importing…";
-
-  function sentenceStep(direction: -1 | 1) {
-    const index = Math.max(0, entries.findIndex((entry) => entry.sentence_id === currentSentence?.sentence_id));
-    const candidate = entries[index + direction];
-    if (candidate?.audio_locator) void seekGlobal(candidate.audio_locator.global_start_ms, playing);
-  }
 
   function chapterStep(direction: -1 | 1) {
     if (!manifest) return;
@@ -292,38 +313,60 @@ export default function ReaderPage() {
   const activeAsset = manifest?.audio_assets.find((item) => globalMs >= item.global_start_ms && globalMs < item.global_start_ms + item.duration_ms) ?? manifest?.audio_assets.at(-1);
   const bookProgress = manifest ? Math.min(100, Math.round(Math.max(globalMs, furthestGlobalMs) / manifest.total_duration_ms * 100)) : 0;
   const chapterProgress = chapter ? Math.min(100, Math.round(Math.max(0, globalMs - chapter.audio_start_ms) / (chapter.audio_end_ms - chapter.audio_start_ms) * 100)) : 0;
-  return <main className={`reader-app theme-${theme}`}>
+  const resumeBook = library.find((item) => item.book_id === lastOpenedBookId);
+  const activeSessionIndex = manifest && activeAsset ? manifest.audio_assets.findIndex((item) => item.id === activeAsset.id) : -1;
+  const artwork = (record: LocalBookRecord) => <div className="book-artwork" aria-hidden="true">{coverUrls[record.book_id] ? <img src={coverUrls[record.book_id]} alt="" /> : <span>{record.manifest.title.trim().slice(0, 1).toUpperCase() || "B"}</span>}</div>;
+
+  return <main className={`reader-app theme-${theme} surface-${surface}`}>
     {/* Audiobook text is rendered and highlighted in the adjacent reader instead of a WebVTT track. */}
     {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
     <audio ref={audioRef} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onTimeUpdate={(event) => setLogicalTime((activeAsset?.global_start_ms ?? 0) + event.currentTarget.currentTime * 1000)} onEnded={handleAssetEnd} />
-    <header className="reader-topbar">
-      <a href="/" className="reader-brand">chapter<span>.</span>cut</a>
-      <strong>{manifest?.title ?? "Local reader"}</strong>
-      <div className="reader-actions">
-        <button className="library-trigger" onClick={() => setLibraryOpen((open) => !open)} aria-expanded={libraryOpen}>Library <b>{library.length}</b></button>
-        {importing ? <button className="reader-cancel" onClick={() => importController.current?.abort()}>{importLabel} · Cancel</button> : <label className="reader-import">Import .zip<input type="file" accept=".zip,application/zip" onChange={(event) => event.target.files?.[0] && void importPackage(event.target.files[0])} /></label>}
-      </div>
-    </header>
-    <aside className={`reader-library ${libraryOpen ? "mobile-open" : ""}`}>
-      <div className="library-title"><span>YOUR LIBRARY</span><b>{library.length}</b><button className="library-close" onClick={() => setLibraryOpen(false)} aria-label="Close library">×</button></div>
+    <input ref={fileInputRef} className="reader-file-input" type="file" accept=".zip,application/zip" aria-label="Choose a BookSync ZIP" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void importPackage(file); }} />
+    {surface === "library" ? <section className="library-home">
+      <header className="library-home-header">
+        <div><span>BOOKSYNC READER</span><h1>Library</h1></div>
+        {importing ? <button className="reader-cancel" onClick={() => importController.current?.abort()}>{importLabel} · Cancel</button> : <button className="reader-import" onClick={() => fileInputRef.current?.click()}><b>＋</b><span>Import book</span></button>}
+      </header>
+      {resumeBook && <button className="resume-card" onClick={() => void openBook(resumeBook)}>
+        {artwork(resumeBook)}
+        <span><small>CONTINUE READING</small><strong>{resumeBook.manifest.title}</strong><em>{resumeBook.manifest.author || "Unknown author"}</em></span>
+        <b>Resume&nbsp;›</b>
+      </button>}
+      <div className="library-section-title"><h2>{library.length ? "Your books" : "Your library is empty"}</h2><span>{library.length} {library.length === 1 ? "book" : "books"}</span></div>
+      <div className="library-grid">
       {library.length ? library.map((item) => {
         const progress = positions[item.book_id];
         const percent = Math.min(100, Math.round((progress?.furthest_global_ms ?? progress?.global_ms ?? 0) / item.manifest.total_duration_ms * 100));
-        return <div className={`library-book ${book?.book_id === item.book_id ? "active" : ""}`} key={item.book_id}>
-          <button onClick={() => void openBook(item)}><strong>{item.manifest.title}</strong><small>{item.manifest.author || "Unknown author"} · {percent}% complete</small><i><em style={{ width: `${percent}%` }} /></i></button>
+        return <article className="library-row" key={item.book_id}>
+          <button className="library-open-book" onClick={() => void openBook(item)}>{artwork(item)}<span className="library-book-copy"><strong>{item.manifest.title}</strong><small>{item.manifest.author || "Unknown author"}</small><em>{item.manifest.chapters.length} chapters · {formatClock(item.manifest.total_duration_ms)}</em><i><span style={{ width: `${percent}%` }} /></i><b>{percent}% complete</b></span><span className="row-arrow">›</span></button>
           <button className="book-delete" title="Remove from this device" aria-label={`Remove ${item.manifest.title}`} onClick={() => void removeBook(item)}>×</button>
-        </div>;
-      }) : <div className="library-empty">Import a processed BookSync ZIP. It remains available after you close the app.</div>}
-    </aside>
-    {manifest && chapter ? <>
-      <nav className="chapter-nav"><span>CHAPTERS · {completedChapterIds.length}/{manifest.chapters.length}</span>{manifest.chapters.map((item, index) => <button className={`${index === chapterIndex ? "active" : ""} ${completedChapterIds.includes(item.id) ? "complete" : ""}`} key={item.id} onClick={() => { setChapterIndex(index); void seekGlobal(item.audio_start_ms); }}><b>{completedChapterIds.includes(item.id) ? "✓" : String(index + 1).padStart(2, "0")}</b><span>{item.title || item.label}</span></button>)}</nav>
+        </article>;
+      }) : <div className="library-empty"><b>Bring your first book.</b><span>Import a processed BookSync ZIP to keep the text, audiobook, highlights, and progress together on this device.</span></div>}
+      </div>
+      <p className="storage-state">{storagePersistent ? "Books are stored offline and protected from automatic cleanup." : "Books are stored on this device. iOS may reclaim them if storage becomes critically low."}</p>
+      {error && <p className="reader-error library-error">{error}</p>}
+      {book && <button className="library-mini-player" onClick={() => setSurface("reader")}>{artwork(book)}<span><small>{playing ? "NOW PLAYING" : "READY TO RESUME"}</small><strong>{book.manifest.title}</strong></span><b>Open&nbsp;›</b></button>}
+    </section> : manifest && chapter ? <>
+      <header className="reader-topbar">
+        <button className="reader-back" onClick={() => { setSurface("library"); setContentsOpen(false); setSpeedOpen(false); }}>‹ <span>Library</span></button>
+        <strong>{manifest.title}</strong>
+        <button className="contents-trigger" onClick={() => setContentsOpen(true)}>Contents</button>
+      </header>
       <section className="reader-stage">
-        <div className="reader-tools"><div><button onClick={() => setTheme("paper")} aria-label="Paper theme">☀</button><button onClick={() => setTheme("night")} aria-label="Night theme">◐</button><button onClick={() => setTheme("contrast")} aria-label="High contrast theme">◒</button></div><div><button onClick={() => setFontSize(Math.max(17, fontSize - 1))} aria-label="Decrease text size">A−</button><span>{fontSize}px</span><button onClick={() => setFontSize(Math.min(32, fontSize + 1))} aria-label="Increase text size">A+</button></div><label><input type="checkbox" checked={follow} onChange={(event) => setFollow(event.target.checked)} /> Follow audio</label></div>
-        <div className="progress-card"><div><span>BOOK PROGRESS</span><b>{bookProgress}%</b></div><progress value={bookProgress} max="100" /><small>{completedChapterIds.length} of {manifest.chapters.length} chapters completed · Chapter {chapterIndex + 1} is {chapterProgress}% complete</small></div>
+        <div className="reader-tools"><button className="chapter-location" onClick={() => setContentsOpen(true)}><small>CHAPTER {chapterIndex + 1} OF {manifest.chapters.length}</small><strong>{chapter.title || chapter.label}</strong></button><div><button onClick={() => setFontSize(Math.max(19, fontSize - 1))} aria-label="Decrease text size">A−</button><span>{fontSize}px</span><button onClick={() => setFontSize(Math.min(38, fontSize + 1))} aria-label="Increase text size">A+</button></div><button className="follow-toggle" aria-pressed={follow} onClick={() => setFollow((value) => !value)}>{follow ? "Follow on" : "Follow off"}</button></div>
+        <div className="reader-progress-strip"><span style={{ width: `${bookProgress}%` }} /><small>{bookProgress}% of book</small></div>
         {renderedChapter}
       </section>
-      <footer className="player"><div className="now-reading"><small>{chapter.title || chapter.label} · {chapterProgress}%</small><strong>{currentSentence?.text ?? "Ready to listen"}</strong></div><div className="transport"><div><button onClick={() => chapterStep(-1)} title="Previous chapter" aria-label="Previous chapter">|‹</button><button onClick={() => sentenceStep(-1)} title="Previous sentence" aria-label="Previous sentence">‹</button><button className="play" onClick={() => playing ? audioRef.current?.pause() : void seekGlobal(globalMs, true)} aria-label={playing ? "Pause audiobook" : "Play audiobook"}>{playing ? "Ⅱ" : "▶"}</button><button onClick={() => sentenceStep(1)} title="Next sentence" aria-label="Next sentence">›</button><button onClick={() => chapterStep(1)} title="Next chapter" aria-label="Next chapter">›|</button></div><label><span>{formatClock(globalMs)}</span><input aria-label="Audiobook progress" type="range" min="0" max={manifest.total_duration_ms} step="1000" value={globalMs} onChange={(event) => { audioRef.current?.pause(); void seekGlobal(Number(event.target.value), false); }} onMouseUp={() => playing && void audioRef.current?.play()} onTouchEnd={() => playing && void audioRef.current?.play()} /><span>{formatClock(manifest.total_duration_ms)}</span></label></div><div className="speed-control" aria-label="Playback speed">{[0.75, 1, 1.25, 1.5, 1.75, 2].map((value) => <button key={value} className={rate === value ? "active" : ""} onClick={() => { setRate(value); if (audioRef.current) audioRef.current.playbackRate = value; }} aria-pressed={rate === value}>{value}×</button>)}</div></footer>
-    </> : <section className="reader-welcome"><span>LOCAL · PRIVATE · SYNCHRONIZED</span><h1>Read with<br />the narrator.</h1><p>Import a validated BookSync ZIP to read the EPUB, hear the audiobook, and follow each sentence as it is spoken.</p>{importing ? <button className="welcome-import reader-cancel" onClick={() => importController.current?.abort()}>{importLabel} · Cancel</button> : <label className="welcome-import">Choose a BookSync ZIP<input type="file" accept=".zip,application/zip" onChange={(event) => event.target.files?.[0] && void importPackage(event.target.files[0])} /></label>}<small className="storage-state">{storagePersistent ? "Offline storage is protected from automatic eviction." : "Your browser may reclaim local books when storage is low."}</small>{error && <p className="reader-error">{error}</p>}</section>}
+      <footer className="player">
+        <button className="now-reading" onClick={() => setContentsOpen(true)}><span><small>{activeSessionIndex >= 0 ? `SESSION ${activeSessionIndex + 1} OF ${manifest.audio_assets.length}` : "READY"}</small><strong>{chapter.title || chapter.label}</strong></span><b>{chapterProgress}%</b></button>
+        <div className="transport"><label><span>{formatClock(globalMs)}</span><input aria-label="Audiobook progress" type="range" min="0" max={manifest.total_duration_ms} step="1000" value={globalMs} onChange={(event) => { audioRef.current?.pause(); void seekGlobal(Number(event.target.value), false); }} onMouseUp={() => playing && void audioRef.current?.play()} onTouchEnd={() => playing && void audioRef.current?.play()} /><span>−{formatClock(Math.max(0, manifest.total_duration_ms - globalMs))}</span></label><div><button onClick={() => chapterStep(-1)} title="Previous chapter" aria-label="Previous chapter">|‹</button><button onClick={() => void seekGlobal(globalMs - 15_000, playing)} title="Back 15 seconds" aria-label="Back 15 seconds">−15</button><button className="play" onClick={() => playing ? audioRef.current?.pause() : void seekGlobal(globalMs, true)} aria-label={playing ? "Pause audiobook" : "Play audiobook"}>{playing ? "Ⅱ" : "▶"}</button><button onClick={() => void seekGlobal(globalMs + 15_000, playing)} title="Forward 15 seconds" aria-label="Forward 15 seconds">+15</button><button onClick={() => chapterStep(1)} title="Next chapter" aria-label="Next chapter">›|</button></div></div>
+        <button className="speed-pill" onClick={() => setSpeedOpen(true)} aria-label={`Playback speed ${rate} times`}>{rate}×</button>
+      </footer>
+
+      {contentsOpen && <div className="sheet-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setContentsOpen(false); }}><section className="reader-sheet contents-sheet" role="dialog" aria-modal="true" aria-labelledby="contents-title"><header><button onClick={() => setContentsOpen(false)} aria-label="Close contents">×</button><h2 id="contents-title">Book contents</h2><span /></header><div className="sheet-tabs" role="tablist"><button role="tab" aria-selected={contentsTab === "chapters"} onClick={() => setContentsTab("chapters")}>Chapters</button><button role="tab" aria-selected={contentsTab === "sessions"} onClick={() => setContentsTab("sessions")}>Timed sessions</button></div><div className="contents-list">{contentsTab === "chapters" ? manifest.chapters.map((item, index) => <button className={index === chapterIndex ? "active" : ""} key={item.id} onClick={() => { setChapterIndex(index); void seekGlobal(item.audio_start_ms, playing); setContentsOpen(false); }}><b>{completedChapterIds.includes(item.id) ? "✓" : String(index + 1).padStart(2, "0")}</b><span><strong>{item.title || item.label}</strong><small>{formatClock(item.audio_start_ms)} · {formatClock(item.audio_end_ms - item.audio_start_ms)}</small></span><em>{index === chapterIndex ? "Now" : "›"}</em></button>) : manifest.audio_assets.map((item, index) => { const owner = manifest.chapters.find((candidate) => item.global_start_ms >= candidate.audio_start_ms && item.global_start_ms < candidate.audio_end_ms); return <button className={item.id === activeAsset?.id ? "active" : ""} key={item.id} onClick={() => { void seekGlobal(item.global_start_ms, playing); setContentsOpen(false); }}><b>{String(index + 1).padStart(2, "0")}</b><span><strong>Session {index + 1}</strong><small>{owner?.title || owner?.label || "Book audio"} · {formatClock(item.duration_ms)}</small></span><em>{item.id === activeAsset?.id ? "Now" : "›"}</em></button>; })}</div></section></div>}
+
+      {speedOpen && <div className="sheet-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSpeedOpen(false); }}><section className="reader-sheet speed-sheet" role="dialog" aria-modal="true" aria-labelledby="speed-title"><header><button onClick={() => setSpeedOpen(false)} aria-label="Close speed controls">×</button><h2 id="speed-title">Playback speed</h2><span /></header><p>Choose a comfortable narration speed.</p><div className="speed-options">{[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5].map((value) => <button key={value} className={rate === value ? "active" : ""} onClick={() => { setRate(value); if (audioRef.current) audioRef.current.playbackRate = value; setSpeedOpen(false); }} aria-pressed={rate === value}>{value}×{rate === value && <span>✓</span>}</button>)}</div></section></div>}
+    </> : null}
     {error && manifest && <div className="reader-toast">{error}</div>}
   </main>;
 }

@@ -50,7 +50,7 @@ For focused reading and listening, open [http://localhost:3000/reader](http://lo
 
 ## Reader: what it remembers
 
-The reader is local and private. After importing a BookSync ZIP, it keeps the library in browser/app storage and restores the last opened book when you return.
+The reader is local and private. After importing a BookSync ZIP, it keeps the library in browser/app storage. The app always opens on the library, with a prominent **Continue reading** card for the last book.
 
 It remembers:
 
@@ -59,7 +59,14 @@ It remembers:
 - the last opened book;
 - reader theme, font size, and follow-audio preference for the current session.
 
-It also provides sentence highlighting, optional darker current-word highlighting, a mobile library drawer, progress scrubber, chapter completion state, and speed controls from `0.75×` to `2×`.
+It also provides sentence highlighting, optional darker current-word highlighting, a cover-based mobile library, progress scrubber, chapter completion state, and speed controls from `0.5×` to `2.5×`.
+
+Inside a book, select **Contents** to switch between two useful views:
+
+- **Chapters** shows the book's hard chapter boundaries, duration, completion, and current chapter.
+- **Timed sessions** shows every manageable audio part already created by BookSync. These sessions remain chapter-safe and never combine two chapters.
+
+The mobile reader uses larger type and touch targets, a compact audiobook player, 15-second skip controls, and a separate playback-speed panel so the book itself has more room on screen.
 
 ## Mobile apps
 
