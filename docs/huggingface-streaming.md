@@ -78,7 +78,7 @@ npm run mobile:build
 ```
 
 ```powershell
-conda run --no-capture-output -n animal-farm-splitter `
+conda run --no-capture-output -n booksync `
   python -m unittest discover -s tests
 ```
 

@@ -43,9 +43,35 @@ PDF or EPUB + audiobook
 - Identify streamed books by the small cloud/play badge on the cover. No badge means the book is stored locally.
 - Download chapter-safe MP3s separately from the synchronized reader package.
 
-## Quick start: process your first book on Windows
+## Windows Studio: the complete desktop workflow
 
-The local web app is the currently supported way to process books on Windows.
+**BookSync Studio** is now the recommended Windows interface. It replaces the earlier blank-window prototype with a functional processing and library application.
+
+Studio can:
+
+- accept a JPG/PNG/WebP cover, PDF/EPUB, and MP3/M4A/M4B/AAC/WAV/FLAC/OGG/Opus/WMA/MP4 audiobook;
+- show transcription, alignment, audio rendering, validation, and packaging progress live;
+- create the portable `.booksync.zip` and expanded server-ready `.booksync` folder together;
+- scan a chosen library folder for processed books;
+- compare local book IDs with the configured private Hugging Face dataset;
+- distinguish **Local only**, **Local + cloud**, and **Cloud only** books; and
+- validate and upload a selected local package to Hugging Face.
+
+Download the newest `BookSync-Studio-*-Setup.exe` from [GitHub Releases](https://github.com/i-am-mushfiq/AudioBookSplitter/releases), or build it from source with:
+
+```powershell
+cd .\frontend
+npm install
+npm run desktop:package
+```
+
+Studio saves books to `Downloads\BookSync` by default. You can change the library folder at any time. The app remembers the folder and processing preferences, but never saves a token entered in the Studio token field.
+
+The Windows installer includes the BookSync application and processing source, but not the multi-gigabyte Python/CUDA runtime. Create the `booksync` Conda environment once before opening Studio. Existing `animal-farm-splitter` and `pdf-audiobook-splitter` environments are detected for backward compatibility. See [the Windows Studio guide](docs/windows-studio.md) for installation, cloud sync, and troubleshooting.
+
+## Run from source: process your first book in the web app
+
+The local web app remains available as a development and fallback interface.
 
 ### 1. Install the requirements
 
@@ -60,10 +86,10 @@ From the project folder, create the Python environment:
 
 ```powershell
 conda env create -f environment.yml
-conda activate animal-farm-splitter
+conda activate booksync
 ```
 
-The environment name is historical; BookSync works with any book.
+Studio also detects the older `animal-farm-splitter` and `pdf-audiobook-splitter` environments for backward compatibility.
 
 Install the web app:
 
@@ -210,7 +236,8 @@ MP3 filenames can be customized without breaking synchronization. BookSync uses 
 
 ## Known issues and limitations
 
-- **Windows desktop app:** earlier BookSync Studio builds may open as an empty black window and are not currently reliable. Use the local web app for processing. The desktop app is intentionally outside the supported `main` release path for now.
+- **Old Windows installers:** builds older than Studio `0.2.0` may open as an empty black window. Remove the old installation and install the current numbered release.
+- **Windows processing runtime:** the installer does not bundle the large Whisper/CUDA environment. Studio reports **Setup needed** until it finds FFmpeg and the required Python packages in a supported Conda environment or `BOOKSYNC_PYTHON`.
 - **iPhone installation:** release IPAs are unsigned. They must be signed by a sideloading tool or by the signed GitHub workflow before installation.
 - **Free Apple sideloading:** personal Apple ID signing normally expires after seven days and must be refreshed. The exact behavior depends on the sideloading method and Apple's current restrictions.
 - **iPhone storage:** iOS can reclaim local app data under severe storage pressure. Keep original `.booksync.zip` files somewhere safe.
@@ -354,7 +381,7 @@ frontend/
 Run the processor tests:
 
 ```powershell
-conda run --no-capture-output -n animal-farm-splitter python -m unittest discover -s tests
+conda run --no-capture-output -n booksync python -m unittest discover -s tests
 ```
 
 Run the reader tests and production build:
@@ -368,7 +395,7 @@ npm run mobile:build
 Validate an exported package:
 
 ```powershell
-conda run --no-capture-output -n animal-farm-splitter python .\tools\validate_booksync_package.py .\output\My_Book.booksync
+conda run --no-capture-output -n booksync python .\tools\validate_booksync_package.py .\output\My_Book.booksync
 ```
 
 The repository contains source code and synthetic or copyright-free fixtures only. Do not commit personal books, audiobooks, generated packages, caches, tokens, or output ZIPs.

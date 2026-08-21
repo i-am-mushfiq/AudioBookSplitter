@@ -1,4 +1,4 @@
-name: pdf-audiobook-splitter
+name: booksync
 channels:
   - conda-forge
 dependencies:
@@ -9,5 +9,6 @@ dependencies:
       - pdfplumber>=0.11.0
       - faster-whisper>=1.1.0
       - jsonschema>=4.23.0
+      - huggingface-hub>=0.34.0
       - nvidia-cublas-cu12
       - nvidia-cudnn-cu12

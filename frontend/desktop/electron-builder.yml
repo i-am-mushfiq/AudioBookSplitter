@@ -1,0 +1,41 @@
+appId: com.mushfiq.booksync.studio
+productName: BookSync Studio
+artifactName: BookSync-Studio-${version}-Setup.${ext}
+directories:
+  output: release-windows
+files:
+  - desktop/main.mjs
+  - desktop/preload.cjs
+  - desktop-app-dist/**
+  - package.json
+extraResources:
+  - from: ../pdf_audiobook_splitter.py
+    to: booksync-core/pdf_audiobook_splitter.py
+  - from: ../processor
+    to: booksync-core/processor
+    filter:
+      - "**/*"
+      - "!**/__pycache__/**"
+      - "!**/*.pyc"
+  - from: ../schemas
+    to: booksync-core/schemas
+  - from: ../tools
+    to: booksync-core/tools
+    filter:
+      - "**/*.py"
+  - from: ../environment.yml
+    to: booksync-core/environment.yml
+  - from: ../requirements.txt
+    to: booksync-core/requirements.txt
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  requestedExecutionLevel: asInvoker
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: BookSync Studio

@@ -8,6 +8,7 @@ import sys
 import wave
 from dataclasses import asdict
 from pathlib import Path
+from typing import Callable
 
 from processor.models import Word
 
@@ -80,8 +81,11 @@ def transcribe(
     device: str,
     duration: float,
     window_seconds: int = 300,
+    progress_callback: Callable[[float, float, str], None] | None = None,
 ) -> list[Word]:
     if cache.exists():
+        if progress_callback:
+            progress_callback(duration, duration, "Using the saved transcript")
         return load_transcript(cache)
     cache.parent.mkdir(parents=True, exist_ok=True)
     if device == "cuda":
@@ -115,6 +119,8 @@ def transcribe(
                 "window_seconds": length,
             },
         )
+        if progress_callback:
+            progress_callback(start, duration, f"Transcribing {start / 60:.0f}–{(start + length) / 60:.0f} min")
         samples = extract_audio_window(audio, start, length)
         segments, _ = model.transcribe(
             samples,
@@ -139,6 +145,8 @@ def transcribe(
                 "words": [asdict(word) for word in words],
             },
         )
+        if progress_callback:
+            progress_callback(completed_until, duration, f"Transcribed {completed_until / 60:.0f} of {duration / 60:.0f} min")
 
     write_json_checkpoint(
         progress_path,

@@ -23,6 +23,19 @@ from tools.score_booksync_package import score_package
 from tools.validate_booksync_package import validate_package
 
 
+EVENT_PREFIX = "BOOKSYNC_EVENT "
+
+
+def emit_event(stage: str, percent: float, message: str, **details: Any) -> None:
+    print(
+        EVENT_PREFIX + json.dumps(
+            {"stage": stage, "percent": percent, "message": message, **details},
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
+
+
 def merged_catalog(current: dict[str, Any] | None, manifest_path: str) -> dict[str, Any]:
     paths = {
         str(item["manifest_path"])
@@ -50,15 +63,18 @@ def remote_catalog(repo_id: str, revision: str) -> dict[str, Any] | None:
 
 def publish(package: Path, repo_id: str, revision: str = "main") -> dict[str, Any]:
     package = package.resolve()
+    emit_event("validating", 5, "Validating the server-ready package")
     issues = validate_package(package)
     if issues:
         details = "\n".join(f"- {issue}" for issue in issues[:20])
         raise RuntimeError(f"BookSync validation failed ({len(issues)} issues):\n{details}")
+    emit_event("scoring", 12, "Creating the package quality scorecard")
     score_path, scorecard = score_package(package)
     token = get_token()
     if not token:
         raise RuntimeError("Hugging Face is not authenticated. Run: hf auth login")
 
+    emit_event("uploading", 20, f"Uploading {package.name} to {repo_id}")
     subprocess.run(
         [
             "hf", "upload", repo_id, str(package), package.name,
@@ -69,6 +85,7 @@ def publish(package: Path, repo_id: str, revision: str = "main") -> dict[str, An
         check=True,
     )
 
+    emit_event("cataloging", 88, "Updating the remote library catalog")
     api = HfApi(token=token)
     manifest_path = f"{package.name}/manifest.json"
     catalog = merged_catalog(remote_catalog(repo_id, revision), manifest_path)
@@ -85,7 +102,7 @@ def publish(package: Path, repo_id: str, revision: str = "main") -> dict[str, An
     files = {item.rfilename: item for item in info.siblings or []}
     if manifest_path not in files or "library.json" not in files:
         raise RuntimeError("Remote verification failed after upload.")
-    return {
+    result = {
         "package": package.name,
         "score": scorecard["score"],
         "grade": scorecard["grade"],
@@ -96,6 +113,8 @@ def publish(package: Path, repo_id: str, revision: str = "main") -> dict[str, An
         "commit_url": str(commit),
         "private": bool(info.private),
     }
+    emit_event("complete", 100, f"{package.stem} is synced to Hugging Face", **result)
+    return result
 
 
 def main() -> int:

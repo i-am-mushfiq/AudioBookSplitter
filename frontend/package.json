@@ -1,7 +1,10 @@
 {
   "name": "site-creator-vinext-starter",
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "description": "BookSync synchronized-book processor, reader, and Windows Studio",
+  "author": "Mushfiq",
   "private": true,
+  "main": "desktop/main.mjs",
   "engines": {
     "node": ">=22.13.0"
   },
@@ -17,6 +20,9 @@
     "android:apk": "npm run mobile:sync && cd android && gradlew.bat assembleDebug",
     "ios:sync": "npm run mobile:sync && cap sync ios",
     "ios:ipa": "npm run ios:sync && xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Release -archivePath build/BookSync.xcarchive archive && xcodebuild -exportArchive -archivePath build/BookSync.xcarchive -exportOptionsPlist ios/ExportOptions.plist -exportPath build/ipa",
+    "desktop:build": "vite build --config desktop/vite.config.ts --configLoader runner",
+    "desktop:dev": "npm run desktop:build && electron desktop/main.mjs",
+    "desktop:package": "npm run desktop:build && electron-builder --config desktop/electron-builder.yml --win --x64",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
@@ -45,6 +51,8 @@
     "@vitejs/plugin-react": "6.0.2",
     "@vitejs/plugin-rsc": "0.5.26",
     "drizzle-kit": "0.31.10",
+    "electron": "^39.8.10",
+    "electron-builder": "^26.15.3",
     "eslint": "9.39.4",
     "eslint-plugin-jsx-a11y": "6.10.2",
     "eslint-plugin-react": "7.37.5",

@@ -14,6 +14,8 @@ frontend/.vinext/
 frontend/.wrangler/
 frontend/build/
 frontend/dist/
+frontend/desktop-app-dist/
+frontend/release-windows/
 frontend/public/*.zip
 
 # Local test books and generated test exports

@@ -4,15 +4,34 @@ import argparse
 import json
 import shutil
 from pathlib import Path
+from typing import Any
 
 from processor.alignment import build_processing_plan, create_alignment_backend
 from processor.audio import audio_duration, render_chunk
 from processor.extractors import extract_book
-from processor.inputs import discover_book, discover_input
+from processor.inputs import SUPPORTED_AUDIO_SUFFIXES, discover_audio, discover_book
 from processor.legacy import DEFAULT_NAMING_TEMPLATE, assign_output_names, write_legacy_manifest
 from processor.packaging import build_booksync_package
 from processor.text import derive_book_name, safe_name
 from processor.transcription import transcribe
+
+
+EVENT_PREFIX = "BOOKSYNC_EVENT "
+
+
+def emit_event(stage: str, percent: float, message: str, **details: Any) -> None:
+    print(
+        EVENT_PREFIX + json.dumps(
+            {
+                "stage": stage,
+                "percent": max(0, min(100, round(percent, 1))),
+                "message": message,
+                **details,
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -29,7 +48,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="PDF or EPUB book; defaults to the only supported book in the current folder",
     )
-    parser.add_argument("--audio", type=Path, help="Audiobook MP3; defaults to the only MP3 in the current folder")
+    parser.add_argument(
+        "--audio",
+        type=Path,
+        help="Audiobook file; supports MP3, M4A, M4B, AAC, WAV, FLAC, OGG, Opus, WMA, and MP4",
+    )
+    parser.add_argument("--cover", type=Path, help="Optional JPG, PNG, or WebP cover included in the BookSync package")
     parser.add_argument("--output", type=Path, default=Path("output"))
     parser.add_argument("--model", default="small", help="Whisper model: tiny, base, small, medium, large-v3")
     parser.add_argument("--device", choices=["cpu", "cuda"], default="cpu")
@@ -57,26 +81,49 @@ def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
     args.pdf = args.pdf or discover_book(Path.cwd())
-    args.audio = args.audio or discover_input(Path.cwd(), ".mp3")
-    for path in (args.pdf, args.audio):
+    args.audio = args.audio or discover_audio(Path.cwd())
+    for path in (args.pdf, args.audio, args.cover):
+        if path is None:
+            continue
         if not path.exists():
             parser.error(f"File not found: {path}")
+    if args.audio.suffix.casefold() not in SUPPORTED_AUDIO_SUFFIXES:
+        parser.error(f"Unsupported audiobook format: {args.audio.suffix or '(none)'}")
+    if args.cover and args.cover.suffix.casefold() not in {".jpg", ".jpeg", ".png", ".webp"}:
+        parser.error("--cover must be a JPG, PNG, or WebP image")
     if args.minutes <= 0:
         parser.error("--minutes must be greater than zero")
     if args.window_seconds <= 0:
         parser.error("--window-seconds must be greater than zero")
 
     args.output.mkdir(parents=True, exist_ok=True)
+    emit_event("preparing", 2, "Checking the source files")
     book = extract_book(args.pdf)
+    emit_event("extracting", 8, f"Found {len(book.chapters)} chapters in the book")
     book_name = safe_name(args.book_name) if args.book_name else derive_book_name(args.pdf, book.sections, book.title)
     duration = audio_duration(args.audio)
+    emit_event("audio", 12, f"Audiobook length: {duration / 60:.1f} minutes")
     requested_cache = args.transcript_cache or (args.output / "transcript.json")
-    words = transcribe(args.audio, requested_cache, args.model, args.device, duration, args.window_seconds)
+
+    def transcription_progress(completed: float, total: float, message: str) -> None:
+        fraction = completed / total if total else 1
+        emit_event("transcribing", 14 + (fraction * 44), message, completed_seconds=completed, total_seconds=total)
+
+    words = transcribe(
+        args.audio,
+        requested_cache,
+        args.model,
+        args.device,
+        duration,
+        args.window_seconds,
+        progress_callback=transcription_progress,
+    )
 
     output_transcript = args.output / "transcript.json"
     if requested_cache.resolve() != output_transcript.resolve():
         shutil.copy2(requested_cache, output_transcript)
 
+    emit_event("aligning", 60, "Matching narration to chapters and sentences")
     plan = build_processing_plan(book, words, book_name, duration, args.minutes, args.mode)
     if not plan.chapter_ranges or not plan.cuts:
         raise SystemExit("No narrated chapter ranges could be aligned. Inspect the transcript and source text.")
@@ -109,6 +156,14 @@ def main(argv: list[str] | None = None) -> None:
                 encoding="utf-8",
             )
             temporary.replace(progress_path)
+            emit_event(
+                "rendering",
+                65 + (completed / len(plan.cuts) * 20),
+                f"Created listening session {completed} of {len(plan.cuts)}",
+                completed_chunks=completed,
+                total_chunks=len(plan.cuts),
+                current_output=cut.output,
+            )
 
     write_legacy_manifest(
         args.output,
@@ -124,6 +179,7 @@ def main(argv: list[str] | None = None) -> None:
     package_path: Path | None = None
     package_archive: Path | None = None
     if not args.dry_run and not args.skip_booksync:
+        emit_event("packaging", 88, "Building and validating the reader package")
         package_path = build_booksync_package(
             output_root=args.output,
             book_path=args.pdf,
@@ -138,6 +194,7 @@ def main(argv: list[str] | None = None) -> None:
             minutes=args.minutes,
             naming_template=args.naming_template,
             alignment_backend=alignment_backend,
+            cover_path=args.cover,
         )
         package_archive = package_path.with_suffix(".booksync.zip")
     if not args.dry_run:
@@ -154,6 +211,14 @@ def main(argv: list[str] | None = None) -> None:
             ),
             encoding="utf-8",
         )
+
+    emit_event(
+        "complete",
+        100,
+        "BookSync ZIP and server-ready package are complete",
+        booksync_package=str(package_path) if package_path else None,
+        booksync_zip=str(package_archive) if package_archive else None,
+    )
 
     print(
         json.dumps(

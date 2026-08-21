@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import html
 import json
+import mimetypes
 import os
 import re
 import shutil
@@ -296,6 +297,7 @@ def build_booksync_package(
     minutes: float,
     naming_template: str,
     alignment_backend: AlignmentBackend,
+    cover_path: Path | None = None,
 ) -> Path:
     source_hash = sha256_file(book_path)
     audiobook_hash = sha256_file(audio_path)
@@ -311,6 +313,20 @@ def build_booksync_package(
     shutil.copy2(transcript_path, transcript_destination)
 
     checksum_paths: list[Path] = [source_destination, transcript_destination]
+    cover_record: dict[str, Any] | None = None
+    if cover_path is not None:
+        cover_extension = cover_path.suffix.casefold()
+        media_type = mimetypes.guess_type(cover_path.name)[0]
+        if cover_extension not in {".jpg", ".jpeg", ".png", ".webp"} or not media_type or not media_type.startswith("image/"):
+            raise ValueError("Cover must be a JPG, PNG, or WebP image")
+        cover_destination = package_root / "cover" / f"cover{cover_extension}"
+        cover_destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(cover_path, cover_destination)
+        checksum_paths.append(cover_destination)
+        cover_record = {
+            **file_record(package_root, cover_destination),
+            "media_type": media_type,
+        }
     audio_assets: list[dict[str, Any]] = []
     for cut in plan.cuts:
         legacy_path = output_root / cut.output
@@ -431,6 +447,7 @@ def build_booksync_package(
             "included_path": source_record["path"],
         },
         "audiobook_sha256": audiobook_hash,
+        **({"cover": cover_record} if cover_record else {}),
         "total_duration_ms": max(1, round(plan.cuts[-1].end * 1000)),
         "chapters": chapters,
         "audio_assets": audio_assets,

@@ -1,0 +1,73 @@
+name: Build Windows Studio
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish the numbered installer as a GitHub Release asset
+        required: true
+        default: true
+        type: boolean
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  windows-studio:
+    name: Build BookSync Studio installer
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run desktop and reader tests
+        working-directory: frontend
+        run: |
+          npm run test:hardening
+          npm run desktop:build
+
+      - name: Build numbered Windows installer
+        working-directory: frontend
+        run: npm run desktop:package
+
+      - name: Locate installer
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "frontend/release-windows" -Filter "BookSync-Studio-*-Setup.exe" | Select-Object -First 1
+          if (-not $installer) { throw "BookSync Studio installer was not created." }
+          $version = node -p "require('./frontend/package.json').version"
+          $numbered = "BookSync-Studio-v$version-r${{ github.run_number }}-Setup.exe"
+          Copy-Item -LiteralPath $installer.FullName -Destination $numbered
+          "INSTALLER_PATH=$numbered" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "INSTALLER_NAME=$numbered" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "RELEASE_TAG=windows-v$version-r${{ github.run_number }}" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: BookSync-Studio-r${{ github.run_number }}
+          path: ${{ env.INSTALLER_PATH }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish direct installer download
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release create "$env:RELEASE_TAG" "$env:INSTALLER_PATH#$env:INSTALLER_NAME" --title "BookSync Studio $env:RELEASE_TAG" --notes "Numbered Windows installer from GitHub Actions run #${{ github.run_number }}. Install the BookSync Conda environment once before processing books."

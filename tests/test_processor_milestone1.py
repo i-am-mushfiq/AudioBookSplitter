@@ -78,6 +78,8 @@ class MilestoneOneProcessorTests(unittest.TestCase):
             source.write_bytes(b"synthetic epub source")
             original_audio = root / "audiobook.wav"
             original_audio.write_bytes(b"synthetic original audio")
+            cover = root / "cover.png"
+            cover.write_bytes(b"synthetic png cover")
             transcript = root / "transcript.json"
             sentence = "This is a synthetic sentence for package validation."
             tokens = sentence.rstrip(".").split()
@@ -125,6 +127,7 @@ class MilestoneOneProcessorTests(unittest.TestCase):
                 "minutes": 10,
                 "naming_template": "{B}.mp3",
                 "alignment_backend": TranscriptSequenceAlignmentBackend(),
+                "cover_path": cover,
             }
             package = build_booksync_package(**builder_arguments)
             rebuilt_package = build_booksync_package(**builder_arguments)
@@ -134,6 +137,8 @@ class MilestoneOneProcessorTests(unittest.TestCase):
             manifest = json.loads((package / "manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["alignment"]["sentence_coverage"], 1.0)
             self.assertEqual(manifest["chapters"][0]["id"], "ch_0001")
+            self.assertEqual(manifest["cover"]["media_type"], "image/png")
+            self.assertEqual((package / manifest["cover"]["path"]).read_bytes(), cover.read_bytes())
             self.assertTrue((package / "content" / "chapter-0001.html").is_file())
 
     def test_sentence_segmentation_preserves_abbreviations_and_dialogue(self) -> None:
