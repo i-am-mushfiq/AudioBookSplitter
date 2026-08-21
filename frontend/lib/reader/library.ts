@@ -3,12 +3,13 @@ import type { BookId, BookSyncManifest, RelativePackagePath } from "../booksync/
 import { IMPORT_LIMITS, PackageValidationError, declaredFiles, expectedExpandedBytes, normalizePackagePath, validateArchiveEntry, validateDeclaredBlob, validateManifest, validateOverlay } from "./validation";
 
 const DB_NAME = "booksync-local-library";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const BOOKS = "books";
 const FILES = "files";
 const POSITIONS = "positions";
 const IMPORTS = "imports";
 const SETTINGS = "settings";
+const HIGHLIGHTS = "highlights";
 
 export type ImportPhase = "reading-manifest" | "checking-storage" | "extracting" | "validating" | "committing";
 export interface ImportProgress { phase: ImportPhase; completed: number; total: number; path?: string }
@@ -35,6 +36,14 @@ export interface ReaderPosition {
   completed_chapter_ids?: string[];
   completed_at?: string;
   updated_at: string;
+}
+
+export interface ReaderHighlight {
+  sentence_id: string;
+  chapter_id: string;
+  text: string;
+  global_ms?: number;
+  created_at: string;
 }
 
 function request<T>(value: IDBRequest<T>): Promise<T> {
@@ -65,6 +74,7 @@ function openDatabase(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(IMPORTS)) db.createObjectStore(IMPORTS, { keyPath: "storage_id" });
       if (!db.objectStoreNames.contains(POSITIONS)) db.createObjectStore(POSITIONS, { keyPath: "book_id" });
       if (!db.objectStoreNames.contains(SETTINGS)) db.createObjectStore(SETTINGS, { keyPath: "key" });
+      if (!db.objectStoreNames.contains(HIGHLIGHTS)) db.createObjectStore(HIGHLIGHTS, { keyPath: "book_id" });
     };
     pending.onsuccess = () => resolve(pending.result);
     pending.onerror = () => reject(pending.error);
@@ -125,6 +135,15 @@ export async function loadPosition(bookId: BookId): Promise<ReaderPosition | und
 export async function savePosition(position: ReaderPosition): Promise<void> { await transaction(POSITIONS, "readwrite", (store) => store.put(position)); }
 export async function listPositions(): Promise<ReaderPosition[]> { return transaction(POSITIONS, "readonly", (store) => store.getAll()) as Promise<ReaderPosition[]>; }
 
+export async function loadHighlights(bookId: BookId): Promise<ReaderHighlight[]> {
+  const row = await transaction(HIGHLIGHTS, "readonly", (store) => store.get(bookId)) as { highlights?: ReaderHighlight[] } | undefined;
+  return row?.highlights ?? [];
+}
+
+export async function saveHighlights(bookId: BookId, highlights: ReaderHighlight[]): Promise<void> {
+  await transaction(HIGHLIGHTS, "readwrite", (store) => store.put({ book_id: bookId, highlights, updated_at: new Date().toISOString() }));
+}
+
 export async function loadLastOpenedBookId(): Promise<BookId | undefined> {
   const value = await transaction(SETTINGS, "readonly", (store) => store.get("last-opened-book")) as { value?: BookId } | undefined;
   return value?.value;
@@ -138,8 +157,9 @@ export async function deleteLocalBook(bookId: BookId): Promise<void> {
   const book = await getBook(bookId);
   if (!book) return;
   const db = await openDatabase();
-  const tx = db.transaction([BOOKS, POSITIONS], "readwrite");
+  const tx = db.transaction([BOOKS, POSITIONS, HIGHLIGHTS], "readwrite");
   tx.objectStore(BOOKS).delete(bookId); tx.objectStore(POSITIONS).delete(bookId);
+  tx.objectStore(HIGHLIGHTS).delete(bookId);
   await transactionDone(tx); db.close();
   await deleteStorage(book.storage_id);
 }
