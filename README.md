@@ -1,37 +1,127 @@
-# AudioBookSplitter / BookSync
+# BookSync
 
-BookSync turns a PDF or EPUB and its matching audiobook into chapter-safe listening files and a synchronized local reading package.
+Turn a PDF or EPUB and its matching audiobook into short, chapter-safe listening sessions and a private synchronized reader. BookSync never deliberately combines two chapters in one MP3, and each cut receives a short fade rather than an abrupt stop.
 
-It can:
+## Start here
 
-- detect chapters from PDF or EPUB content;
-- transcribe long audiobooks in bounded, resumable windows with `faster-whisper`;
-- align book sentences to audiobook timestamps;
-- split audio near the requested duration without crossing chapter boundaries;
-- export readable, configurable MP3 filenames and a downloadable ZIP;
-- build a validated `.booksync` package containing canonical chapter HTML, audio assets, checksums, sentence overlays, and optional word timings;
-- highlight the spoken sentence and current word in the browser reader;
-- preserve a private offline library, playback speed, chapter, and listening position in browser storage.
+The quickest reliable route is the local web app.
+
+1. Install the Python environment once:
+
+   ```powershell
+   conda env create -f environment.yml
+   conda activate animal-farm-splitter
+   ```
+
+2. Install the web app once:
+
+   ```powershell
+   cd .\frontend
+   npm install
+   ```
+
+3. Start the local processing service from the project root:
+
+   ```powershell
+   node .\frontend\local-server.mjs
+   ```
+
+4. In a second terminal, start the interface:
+
+   ```powershell
+   cd .\frontend
+   npm run dev
+   ```
+
+5. Open [http://localhost:3000](http://localhost:3000), upload your PDF/EPUB and audiobook, choose your options, and process the book.
+
+The result includes chapter-safe MP3 files and a portable `<Book_Name>.booksync.zip` that can be opened by the synchronized reader.
+
+## What to do in the app
+
+1. Choose the book source: **PDF** or **EPUB**.
+2. Choose its matching audiobook file.
+3. Enter a book name if you do not want to use the file name.
+4. Choose a target session length, such as 10 minutes. BookSync keeps chapter boundaries hard even when this means a part is shorter or longer.
+5. Select **CUDA/GPU** when your NVIDIA environment is ready; otherwise select CPU.
+6. Start processing and download the ZIP when it finishes.
+
+For focused reading and listening, open [http://localhost:3000/reader](http://localhost:3000/reader) and import the generated `.booksync.zip`.
+
+## Reader: what it remembers
+
+The reader is local and private. After importing a BookSync ZIP, it keeps the library in browser/app storage and restores the last opened book when you return.
+
+It remembers:
+
+- current chapter, sentence, listening position, and playback speed;
+- furthest book progress and completed chapters;
+- the last opened book;
+- reader theme, font size, and follow-audio preference for the current session.
+
+It also provides sentence highlighting, optional darker current-word highlighting, a mobile library drawer, progress scrubber, chapter completion state, and speed controls from `0.75×` to `2×`.
+
+## Mobile apps
+
+Android and iPhone use the same reader bundle through Capacitor.
+
+### Downloading an iPhone build
+
+Manually run the **Build unsigned iPhone IPA** or **Build iPhone IPA** workflow in GitHub Actions with **Publish release** enabled. Successful manual builds create a numbered direct `.ipa` download under [GitHub Releases](https://github.com/i-am-mushfiq/AudioBookSplitter/releases).
+
+Example filename:
+
+```text
+BookSync-Reader-v0.1.0-development-r12.ipa
+```
+
+The number after `r` is the GitHub Actions run number. Actions artifacts are retained as a 14-day fallback but GitHub wraps them in a ZIP; Release assets download as the IPA itself.
+
+Unsigned IPA builds prove that the app compiles. They cannot be installed on a physical iPhone. For an installable IPA, use the signed workflow with an Apple development/ad-hoc/App Store provisioning profile and signing certificate.
+
+### Building mobile projects locally
+
+```powershell
+cd .\frontend
+npm run mobile:sync
+```
+
+Build an Android debug APK after installing JDK 17 and the Android SDK:
+
+```powershell
+npm run android:apk
+```
+
+The iPhone project requires macOS/Xcode for a local signed build. See [frontend/ios/README.md](frontend/ios/README.md) for Apple signing details.
+
+## Known issues and limitations
+
+- **Windows desktop app:** not currently reliable. Earlier BookSync Studio installer builds can open as a blank/black window. Do not use them for processing; use the local web app above instead. The desktop app is not part of the supported `main` branch release path.
+- **Unsigned iPhone IPA:** downloads directly but cannot be installed on an iPhone. Apple signing is mandatory for device installation, TestFlight, or App Store distribution.
+- **Local iPhone storage:** the reader requests persistent storage, but iOS can still reclaim local data under severe storage pressure. Keep the original `.booksync.zip` so you can re-import it.
+- **Long audiobook processing:** transcription is intentionally windowed to avoid whole-book memory exhaustion. It can still take a long time, especially on CPU.
+- **Alignment quality:** the audiobook must match the edition closely. Different abridgements, translations, skipped introductions, or inaccurate source chapter headings can reduce alignment quality.
+- **PDF structure:** EPUB normally provides cleaner chapters than PDF. Scanned/image-only PDFs may need OCR or a better source file.
 
 ## Requirements
 
-- Windows, macOS, or Linux with Python 3.11+
-- FFmpeg and FFprobe available on `PATH`
+- Python 3.11+
+- FFmpeg and FFprobe on `PATH`
 - Node.js 22.13+ for the web interface
-- NVIDIA GPU and CUDA are optional but recommended for transcription
+- An NVIDIA GPU and CUDA are optional, but recommended for fast transcription
 
-## Python setup
+### Python environment
 
-Using Conda:
+Conda is recommended:
 
 ```powershell
 conda env create -f environment.yml
 conda activate animal-farm-splitter
 ```
 
-The historical environment name is retained for compatibility; the application itself is book-agnostic.
+The historical Conda environment name is retained for compatibility; BookSync is not specific to Animal Farm.
 
-Using `venv`:
+Alternatively, use a virtual environment:
 
 ```powershell
 python -m venv .venv
@@ -41,13 +131,13 @@ python -m pip install -r requirements.txt
 
 ## Command-line processing
 
-When the working directory contains exactly one PDF or EPUB and one audiobook, inputs can be detected automatically:
+If the current folder contains exactly one supported book and audiobook, BookSync can detect them automatically:
 
 ```powershell
 python .\pdf_audiobook_splitter.py --device cuda --model small
 ```
 
-Explicit inputs and output directory:
+For explicit paths:
 
 ```powershell
 python .\pdf_audiobook_splitter.py `
@@ -63,86 +153,26 @@ Useful options:
 
 - `--device cpu|cuda`: transcription device.
 - `--model small|medium|...`: Whisper model.
-- `--window-seconds 300`: bounded transcription window, preventing whole-book STFT memory exhaustion.
-- `--minutes 10`: approximate target duration for time-based parts.
-- `--mode smart`: sentence-aware timed splitting; chapter-wide output is also available through the UI.
-- `--resume`: reuse checkpoints and valid rendered audio after interruption.
-- `--transcript-cache <path>`: reuse a transcript generated elsewhere.
-- `--dry-run`: inspect the planned cuts without rendering MP3s.
-- `--skip-booksync`: produce only the legacy MP3 export.
+- `--window-seconds 300`: transcription window size; this is the main protection against large memory allocations.
+- `--minutes 10`: approximate time-based part length.
+- `--mode smart`: sentence-aware time-based splitting. `chapter` creates one output per chapter.
+- `--resume`: continue from valid existing audio chunks after an interruption.
+- `--transcript-cache <path>`: reuse an existing transcript.
+- `--dry-run`: plan cuts without rendering audio.
+- `--skip-booksync`: produce only the legacy MP3 output.
 
-Chapter boundaries are always hard boundaries: one output MP3 never contains two chapters. Cuts receive short fades to avoid abrupt transitions.
+## Output files
 
-## Web application
+The output directory contains:
 
-Install frontend dependencies:
-
-```powershell
-cd .\frontend
-npm install
-```
-
-Run the local processing service from the repository root:
-
-```powershell
-node .\frontend\local-server.mjs
-```
-
-Run the frontend in another terminal:
-
-```powershell
-cd .\frontend
-npm run dev
-```
-
-Open `http://localhost:3000`. The splitter accepts a PDF or EPUB plus an audiobook, exposes chunking and filename options, processes the uploaded files through the local service on port 3001, and downloads the actual result as a ZIP.
-
-The synchronized reader is available at `http://localhost:3000/reader`.
-
-Every processed book now also produces a portable `<Book_Name>.booksync.zip`. This is the full reader package—source publication, chapter content, synchronized audio, overlays, transcript, quality reports, manifest, and checksums—and can be imported on desktop, Android, or iPhone.
-
-## Synchronized reader
-
-Import a processed BookSync ZIP in `/reader` to:
-
-- read sanitized EPUB-derived chapter content;
-- play a continuous logical audiobook timeline across split audio assets;
-- retain the full active-sentence highlight;
-- show the current spoken word in darker green when word timings are available;
-- navigate by chapter or sentence;
-- change theme, font size, follow mode, and playback speed;
-- reopen the last book automatically, with its saved chapter, sentence, position, and speed;
-- retain an offline local library across relaunches, with visible whole-book and chapter completion progress;
-- use larger touch controls, a mobile library drawer, and a persistent audio progress scrubber on iPhone.
-
-Older BookSync packages without the optional `words` overlay field continue to work with sentence-only highlighting. Reprocess an older source pair to add word highlighting.
-
-Reader imports validate schemas, exact sizes, SHA-256 checksums, paths, archive limits, timeline consistency, and word timing order before committing data atomically to IndexedDB. EPUB markup is sanitized with DOMPurify. Database upgrades preserve existing local books rather than rebuilding their storage.
-
-## Mobile targets
-
-The reader has one shared static PWA bundle with Capacitor projects for Android and iPhone. Build the shared mobile bundle and synchronize native projects:
-
-```powershell
-cd .\frontend
-npm run mobile:sync
-```
-
-Android debug APK builds with `npm run android:apk` after installing JDK 17 and the Android SDK. iPhone IPA export requires macOS, Xcode, and an Apple Developer signing team; see [`frontend/ios/README.md`](frontend/ios/README.md).
-
-When either iPhone workflow is manually dispatched with **Publish release** enabled, it creates a numbered GitHub Release asset for direct `.ipa` download (for example, `BookSync-Reader-v0.1.0-development-r12.ipa`). GitHub Actions artifacts remain as a 14-day fallback, but GitHub always wraps artifact downloads in a ZIP. The unsigned workflow's direct IPA proves compilation only; it still cannot install on a device without Apple signing.
-
-## Output structure
-
-The selected output directory contains:
-
-- chapter-safe MP3 listening parts;
-- `manifest.json` for the legacy split export;
-- resumable transcript and processing checkpoints;
-- `<Book_Name>.booksync/`, the synchronized package directory;
+- chapter-safe MP3 listening parts with your selected naming style;
+- `manifest.json` for the legacy MP3 export;
+- a resumable transcript and processing checkpoints;
+- `<Book_Name>.booksync/`, the synchronized reader package;
+- `<Book_Name>.booksync.zip`, the portable package for the reader;
 - alignment quality and review reports.
 
-The BookSync package contains:
+The package itself contains canonical content, audio, transcript, overlays, reports, source publication, manifest, and checksums:
 
 ```text
 <Book_Name>.booksync/
@@ -156,9 +186,11 @@ The BookSync package contains:
 `-- source/
 ```
 
-User-selected filenames are presentation details. Internal stable IDs and content hashes preserve synchronization independently of export naming.
+Custom MP3 names are presentation details. Stable internal IDs and content hashes maintain synchronization regardless of naming style.
 
-## Architecture
+## For contributors
+
+Architecture:
 
 ```text
 processor/
@@ -171,32 +203,28 @@ processor/
 
 frontend/
 |-- app/               splitter and synchronized reader UI
-|-- lib/booksync/      BookSync types
-|-- lib/reader/        validation, storage, and reader logic
+|-- mobile/            Capacitor/PWA mobile bundle
+|-- lib/booksync/      package types
+|-- lib/reader/        validation, local storage, and reader logic
 `-- tests/             reader hardening tests
 ```
 
-The package contract and roadmap are documented in [docs/booksync-package-v1.md](docs/booksync-package-v1.md), [docs/milestone-3.md](docs/milestone-3.md), [docs/milestone-3.5-p0-hardening.md](docs/milestone-3.5-p0-hardening.md), and [PLAN.md](PLAN.md).
-
-## Validation and tests
-
-Run all Python tests:
+Run the checks:
 
 ```powershell
 conda run --no-capture-output -n animal-farm-splitter python -m unittest discover -s tests
 ```
 
-Validate a package:
+```powershell
+cd .\frontend
+npm test
+npm run mobile:build
+```
+
+Validate an exported package:
 
 ```powershell
 conda run --no-capture-output -n animal-farm-splitter python .\tools\validate_booksync_package.py .\output\My_Book.booksync
 ```
 
-Build the frontend and run reader tests:
-
-```powershell
-cd .\frontend
-npm test
-```
-
-The repository includes only source code and synthetic/copyright-free fixtures. Personal books, audiobooks, generated packages, caches, and output ZIPs must remain untracked.
+The repository contains source code and synthetic/copyright-free fixtures only. Keep personal books, audiobooks, generated packages, caches, and output ZIPs untracked.
