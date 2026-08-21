@@ -1,4 +1,4 @@
-import type { BookSyncOverlayEntry } from "../booksync/types";
+import type { BookSyncAudioAsset, BookSyncOverlayEntry } from "../booksync/types";
 
 export async function safeChapterMarkup(source: string): Promise<string> {
   const { default: DOMPurify } = await import("dompurify");
@@ -39,6 +39,22 @@ export function activeWordIndex(entry: BookSyncOverlayEntry | undefined, globalM
   if (exact >= 0) return exact;
   for (let index = words.length - 1; index >= 0; index--) if (elapsed >= words[index].start_ms) return index;
   return -1;
+}
+
+export function loadedAudioAsset(assets: BookSyncAudioAsset[], assetId: string | undefined) {
+  if (!assetId) return undefined;
+  return assets.find((asset) => asset.id === assetId);
+}
+
+export function logicalTimeForAudioAsset(asset: BookSyncAudioAsset, currentTimeSeconds: number) {
+  const localMs = Number.isFinite(currentTimeSeconds) ? currentTimeSeconds * 1000 : 0;
+  return asset.global_start_ms + Math.max(0, Math.min(localMs, asset.duration_ms));
+}
+
+export function nextAudioAsset(assets: BookSyncAudioAsset[], assetId: string | undefined) {
+  if (!assetId) return undefined;
+  const index = assets.findIndex((asset) => asset.id === assetId);
+  return index >= 0 ? assets[index + 1] : undefined;
 }
 
 export function formatClock(milliseconds: number) {

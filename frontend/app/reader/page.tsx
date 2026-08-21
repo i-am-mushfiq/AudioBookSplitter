@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BookSyncOverlay, BookSyncOverlayEntry } from "../../lib/booksync/types";
-import { activeEntry, activeWordIndex, formatClock, safeChapterMarkup } from "../../lib/reader/content";
+import { activeEntry, activeWordIndex, formatClock, loadedAudioAsset, logicalTimeForAudioAsset, nextAudioAsset, safeChapterMarkup } from "../../lib/reader/content";
 import { deleteLocalBook, importBookSyncZip, listLocalBooks, listPositions, loadLastOpenedBookId, loadPosition, readPackageFile, readPackageText, saveLastOpenedBookId, savePosition, verifyLocalBook, type ImportProgress, type LocalBookRecord, type ReaderPosition } from "../../lib/reader/library";
 import "./reader.css";
 import "./highlight.css";
@@ -303,11 +303,16 @@ export default function ReaderPage() {
   }
 
   function handleAssetEnd() {
-    if (!manifest || !activeAsset) return;
-    const index = manifest.audio_assets.findIndex((item) => item.id === activeAsset.id);
-    const following = manifest.audio_assets[index + 1];
+    if (!manifest) return;
+    const following = nextAudioAsset(manifest.audio_assets, activeAssetId.current);
     if (following) void seekGlobal(following.global_start_ms, true);
     else { setPlaying(false); setLogicalTime(manifest.total_duration_ms); }
+  }
+
+  function handleTimeUpdate(audio: HTMLAudioElement) {
+    if (!manifest) return;
+    const loaded = loadedAudioAsset(manifest.audio_assets, activeAssetId.current);
+    if (loaded) setLogicalTime(logicalTimeForAudioAsset(loaded, audio.currentTime));
   }
 
   const activeAsset = manifest?.audio_assets.find((item) => globalMs >= item.global_start_ms && globalMs < item.global_start_ms + item.duration_ms) ?? manifest?.audio_assets.at(-1);
@@ -320,7 +325,7 @@ export default function ReaderPage() {
   return <main className={`reader-app theme-${theme} surface-${surface}`}>
     {/* Audiobook text is rendered and highlighted in the adjacent reader instead of a WebVTT track. */}
     {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-    <audio ref={audioRef} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onTimeUpdate={(event) => setLogicalTime((activeAsset?.global_start_ms ?? 0) + event.currentTarget.currentTime * 1000)} onEnded={handleAssetEnd} />
+    <audio ref={audioRef} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onTimeUpdate={(event) => handleTimeUpdate(event.currentTarget)} onEnded={handleAssetEnd} />
     <input ref={fileInputRef} className="reader-file-input" type="file" accept=".zip,application/zip" aria-label="Choose a BookSync ZIP" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void importPackage(file); }} />
     {surface === "library" ? <section className="library-home">
       <header className="library-home-header">

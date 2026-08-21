@@ -51,6 +51,30 @@ test("word lookup follows sentence-relative timing", () => {
   assert.equal(content.activeWordIndex(entry, 2000), -1);
 });
 
+test("loaded audio identity prevents a timed-session boundary from skipping ahead", () => {
+  const assets = [
+    { id: "aud_1", global_start_ms: 0, duration_ms: 600_000 },
+    { id: "aud_2", global_start_ms: 600_000, duration_ms: 600_000 },
+    { id: "aud_3", global_start_ms: 1_200_000, duration_ms: 300_000 },
+  ];
+  const loaded = content.loadedAudioAsset(assets, "aud_1");
+  assert.equal(loaded.id, "aud_1");
+  assert.equal(content.logicalTimeForAudioAsset(loaded, 600), 600_000);
+  assert.equal(content.nextAudioAsset(assets, loaded.id).id, "aud_2");
+});
+
+test("a chapter-boundary session advances exactly one asset", () => {
+  const assets = [
+    { id: "chapter_1_part_1", global_start_ms: 0, duration_ms: 600_000 },
+    { id: "chapter_1_part_2", global_start_ms: 600_000, duration_ms: 240_000 },
+    { id: "chapter_2_part_1", global_start_ms: 840_000, duration_ms: 600_000 },
+  ];
+  const ended = content.loadedAudioAsset(assets, "chapter_1_part_2");
+  assert.equal(content.logicalTimeForAudioAsset(ended, 240), 840_000);
+  assert.equal(content.nextAudioAsset(assets, ended.id).id, "chapter_2_part_1");
+  assert.equal(content.nextAudioAsset(assets, "chapter_2_part_1"), undefined);
+});
+
 const privatePackage = resolve(root, "..", "test1-milestone2-output", "Animal_Farm.booksync");
 test("validates every declared file in the available full-book package", { skip: !existsSync(privatePackage) }, async () => {
   const manifest = await validation.validateManifest(JSON.parse(await readFile(resolve(privatePackage, "manifest.json"), "utf8")));
