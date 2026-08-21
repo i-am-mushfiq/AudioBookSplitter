@@ -20,11 +20,10 @@ The catalog accepts the generic `booksync-library` format and the older `booksyn
 
 ## Connect from iPhone
 
-1. Create a fine-grained Hugging Face token with read access only to the private dataset.
+1. Create a fine-grained Hugging Face token with read access only to `mdrahman/booksync-library`.
 2. Open BookSync Reader on the Library screen.
 3. Select **Hugging Face**.
-4. Enter `owner/dataset` or the complete Hugging Face dataset URL.
-5. Paste the read token and connect.
+4. Paste the read token and connect. The canonical dataset is fixed in the app and cannot be mistyped.
 
 The token is supplied at runtime and is never compiled into the IPA, uploaded package, catalog, or source code. The current Capacitor reader stores the connection in app-local IndexedDB so it survives relaunches. Use a dedicated read-only token because native iOS Keychain storage is not implemented yet.
 
@@ -54,7 +53,7 @@ Then publish:
 ```powershell
 python .\tools\publish_huggingface_package.py `
   "C:\Books\My_Book.booksync" `
-  --repo owner/booksync-library
+  --repo mdrahman/booksync-library
 ```
 
 The command:

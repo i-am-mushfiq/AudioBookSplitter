@@ -31,6 +31,13 @@ test("keeps chapter HTML stable while audio timing updates", async () => {
   assert.doesNotMatch(readerSource, /<article[^>]+onClick=\{handleReaderTap\}[^>]+dangerouslySetInnerHTML/);
 });
 
+test("uses the canonical private Hugging Face dataset without an editable repository field", async () => {
+  const readerSource = await readFile(resolve(root, "app", "reader", "page.tsx"), "utf8");
+  assert.match(readerSource, /const CANONICAL_HUGGING_FACE_REPO = "mdrahman\/booksync-library"/);
+  assert.match(readerSource, /connectHuggingFaceLibrary\(CANONICAL_HUGGING_FACE_REPO,/);
+  assert.doesNotMatch(readerSource, /setHuggingFaceRepo|<span>Dataset<\/span>/);
+});
+
 test("accepts the canonical manifest and overlay", async () => {
   const manifest = await validation.validateManifest(JSON.parse(await readFile(resolve(fixtureRoot, "manifest.json"), "utf8")));
   const overlayPath = manifest.overlay_assets[0].path;

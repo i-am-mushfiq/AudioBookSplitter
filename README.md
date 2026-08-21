@@ -93,7 +93,7 @@ oci os object bulk-upload `
 
 ## Streaming from a private Hugging Face dataset
 
-The iPhone/mobile reader can also connect directly to a private Hugging Face dataset. On the Library screen, select **Hugging Face**, enter the dataset as `owner/dataset`, and provide a fine-grained read-only token that can access it.
+The iPhone/mobile reader connects to the canonical private Hugging Face dataset. On the Library screen, select **Hugging Face** and provide a fine-grained read-only token that can access it; the repository is fixed in the app to prevent accidental connections to the wrong library.
 
 For the current personal library:
 
