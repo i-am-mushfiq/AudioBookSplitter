@@ -1,0 +1,18 @@
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overscroll-behavior: none;
+}
+
+body {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  background: #10110f;
+}
+
+@media (display-mode: standalone) {
+  .reader-app {
+    height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+}

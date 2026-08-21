@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import type { BookSyncOverlay, BookSyncOverlayEntry } from "../../lib/booksync/types";
 import { activeEntry, activeWordIndex, formatClock, safeChapterMarkup } from "../../lib/reader/content";
 import { deleteLocalBook, importBookSyncZip, listLocalBooks, loadPosition, readPackageFile, readPackageText, savePosition, verifyLocalBook, type ImportProgress, type LocalBookRecord } from "../../lib/reader/library";
@@ -236,7 +235,7 @@ export default function ReaderPage() {
     {/* Audiobook text is rendered and highlighted in the adjacent reader instead of a WebVTT track. */}
     {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
     <audio ref={audioRef} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onTimeUpdate={(event) => setLogicalTime((activeAsset?.global_start_ms ?? 0) + event.currentTarget.currentTime * 1000)} onEnded={handleAssetEnd} />
-    <header className="reader-topbar"><Link href="/" className="reader-brand">chapter<span>.</span>cut</Link><strong>{manifest?.title ?? "Local reader"}</strong><div>{importing ? <button className="reader-cancel" onClick={() => importController.current?.abort()}>{importLabel} · Cancel</button> : <label className="reader-import">Import .zip<input type="file" accept=".zip,application/zip" onChange={(event) => event.target.files?.[0] && void importPackage(event.target.files[0])} /></label>}</div></header>
+    <header className="reader-topbar"><a href="/" className="reader-brand">chapter<span>.</span>cut</a><strong>{manifest?.title ?? "Local reader"}</strong><div>{importing ? <button className="reader-cancel" onClick={() => importController.current?.abort()}>{importLabel} · Cancel</button> : <label className="reader-import">Import .zip<input type="file" accept=".zip,application/zip" onChange={(event) => event.target.files?.[0] && void importPackage(event.target.files[0])} /></label>}</div></header>
     <aside className="reader-library"><div className="library-title"><span>LOCAL LIBRARY</span><b>{library.length}</b></div>{library.length ? library.map((item) => <div className={`library-book ${book?.book_id === item.book_id ? "active" : ""}`} key={item.book_id}><button onClick={() => void openBook(item)}><strong>{item.manifest.title}</strong><small>{item.manifest.author || "Unknown author"} · {formatClock(item.manifest.total_duration_ms)}</small></button><button className="book-delete" title="Remove from this device" onClick={() => void removeBook(item)}>×</button></div>) : <div className="library-empty">Import a processed BookSync ZIP. It stays in this browser.</div>}</aside>
     {manifest && chapter ? <>
       <nav className="chapter-nav"><span>CHAPTERS</span>{manifest.chapters.map((item, index) => <button className={index === chapterIndex ? "active" : ""} key={item.id} onClick={() => { setChapterIndex(index); void seekGlobal(item.audio_start_ms); }}><b>{String(index + 1).padStart(2, "0")}</b><span>{item.title || item.label}</span></button>)}</nav>
