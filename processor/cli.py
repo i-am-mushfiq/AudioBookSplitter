@@ -122,6 +122,7 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     package_path: Path | None = None
+    package_archive: Path | None = None
     if not args.dry_run and not args.skip_booksync:
         package_path = build_booksync_package(
             output_root=args.output,
@@ -138,6 +139,7 @@ def main(argv: list[str] | None = None) -> None:
             naming_template=args.naming_template,
             alignment_backend=alignment_backend,
         )
+        package_archive = package_path.with_suffix(".booksync.zip")
     if not args.dry_run:
         (args.output / "processing-progress.json").write_text(
             json.dumps(
@@ -146,6 +148,7 @@ def main(argv: list[str] | None = None) -> None:
                     "completed_chunks": len(plan.cuts),
                     "total_chunks": len(plan.cuts),
                     "booksync_package": str(package_path) if package_path else None,
+                    "booksync_zip": str(package_archive) if package_archive else None,
                 },
                 indent=2,
             ),
@@ -160,6 +163,7 @@ def main(argv: list[str] | None = None) -> None:
                 "output": str(args.output),
                 "chapters_found": len(plan.chapter_ranges),
                 "booksync_package": str(package_path) if package_path else None,
+                "booksync_zip": str(package_archive) if package_archive else None,
             },
             indent=2,
         )

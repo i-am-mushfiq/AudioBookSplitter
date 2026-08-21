@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
 from tools.validate_booksync_package import PROJECT_ROOT, load_schema, validate_package
+from processor.packaging.booksync import archive_booksync_package
 
 
 EXAMPLE_PACKAGE = PROJECT_ROOT / "examples" / "minimal.booksync"
@@ -52,6 +54,16 @@ class BookSyncContractTests(unittest.TestCase):
             manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
             issues = validate_package(copied)
             self.assertTrue(any(issue.location == "manifest.book_id" for issue in issues))
+
+    def test_portable_package_archive_contains_the_package_root_contents(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            package = Path(directory) / "Example.booksync"
+            package.mkdir()
+            (package / "manifest.json").write_text("{}", encoding="utf-8")
+            archive = archive_booksync_package(package)
+            self.assertEqual(archive.name, "Example.booksync.zip")
+            with zipfile.ZipFile(archive) as zipped:
+                self.assertEqual(zipped.namelist(), ["manifest.json"])
 
     @staticmethod
     def _copy_package(source: Path, destination: Path) -> None:

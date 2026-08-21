@@ -5,7 +5,6 @@ import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import Busboy from "busboy";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { zipSync } from "fflate";
 
 const run = promisify(execFile);
 const projectRoot = path.resolve(process.cwd(), "..");
@@ -14,14 +13,6 @@ const script = path.join(projectRoot, "pdf_audiobook_splitter.py");
 
 function safeFileName(value) {
   return (value || "Book").replace(/\.[^.]+$/, "").replace(/[^a-z0-9_-]+/gi, "_").replace(/^_+|_+$/g, "") || "Book";
-}
-
-async function zipOutput(directory) {
-  const files = {};
-  for (const name of await readdir(directory)) {
-    if (name.endsWith(".mp3") || name === "manifest.json") files[name] = await readFile(path.join(directory, name));
-  }
-  return zipSync(files, { level: 1 });
 }
 
 function collectUpload(request, root) {
@@ -76,10 +67,12 @@ const server = http.createServer(async (request, response) => {
     const inputBookName = fields.book_name?.trim() || path.basename(files.pdf).replace(/\.[^.]+$/, "");
     const bookName = safeFileName(inputBookName);
     await run(python, [script, "--pdf", files.pdf, "--audio", files.audio, "--output", output, "--model", "small", "--device", "cuda", "--minutes", fields.minutes || "10", "--mode", fields.mode || "smart", "--naming-template", template, "--book-name", bookName], { cwd: projectRoot, maxBuffer: 1024 * 1024 * 4 });
-    const zip = zipOutput(output);
-    const data = await zip;
-    response.writeHead(200, { "Content-Type": "application/zip", "Content-Disposition": `attachment; filename=${bookName}_export.zip`, "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" });
-    response.end(Buffer.from(data));
+    const outputFiles = await readdir(output);
+    const archiveName = outputFiles.find((name) => name.endsWith(".booksync.zip"));
+    if (!archiveName) throw new Error("The processor did not produce a portable BookSync ZIP.");
+    const data = await readFile(path.join(output, archiveName));
+    response.writeHead(200, { "Content-Type": "application/zip", "Content-Disposition": `attachment; filename=${archiveName}`, "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" });
+    response.end(data);
   } catch (error) {
     sendJson(response, 500, { error: error instanceof Error ? error.message.slice(-1800) : "The processing job failed." });
   } finally {
