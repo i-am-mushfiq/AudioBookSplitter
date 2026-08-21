@@ -483,6 +483,28 @@ Advanced caching is deliberately deferred. It needs:
 - Cache inspection, manual clearing, and per-provider priorities
 - Clear distinction between cached copies and remote originals
 
+#### Adaptive cache optimization — planned
+
+The implemented previous-2/current/next-3 window remains the deterministic baseline and offline-safe fallback. A later adaptive layer should reduce waiting, bandwidth, and storage without weakening the 1.5 GiB emergency ceiling:
+
+- Play the current session from a verified progressive buffer instead of waiting for the complete session download.
+- Treat the next session as high-priority; fetch next 2 and next 3 opportunistically only after playback is stable.
+- During sequential playback, retain the previous 2 sessions already obtained. After a distant random seek, do not immediately download previous sessions that were never cached; fetch them only when the listener rewinds or available network/storage conditions make the cost negligible.
+- Permit one prioritized background transfer at a time and cancel stale transfers immediately after a seek, book switch, provider disconnect, or manifest revision.
+- Adapt forward depth using available native network type, data-saver, battery/power, free-storage, and recent playback behavior signals. Fall back to the deterministic six-session window when those signals are unavailable or unreliable on iOS.
+- Version cached objects by provider, book ID, manifest revision, declared byte length, and SHA-256 so changed packages cannot reuse stale audio.
+- Preserve small chapter text and overlays separately from the audio window, with bounded metadata cleanup for books that have not been opened recently.
+- Add optional per-book offline pinning as an explicit user action; pinned content must be clearly separated from automatic cache accounting.
+
+Adaptive-cache acceptance checks:
+
+- Playback can begin after a safe initial buffer rather than a complete 10-minute session download.
+- Next-session playback normally starts without a network wait during uninterrupted listening.
+- A distant seek does not download five neighboring sessions unconditionally.
+- Stale or cancelled transfers cannot reinsert audio outside the active window.
+- Automatic audio remains within the active policy and the total managed cache never exceeds 1.5 GiB.
+- Behavior is tested on Wi-Fi, constrained/cellular networking, low-storage conditions, relaunch, rapid seeking, and provider/package revision changes.
+
 ### Credentials and security
 
 - Credentials must never be written into BookSync packages.
@@ -720,7 +742,8 @@ Deliverables:
 Remaining hardening:
 
 - Physical-device interruption and expired-PAR testing
-- Current-session resumable chunk cache
+- Progressive current-session buffer and resumable chunk cache
+- Adaptive staged prefetch and demand-aware rewind retention
 - Configurable cache controls and offline pinning
 - Automated upload and catalog refresh
 
