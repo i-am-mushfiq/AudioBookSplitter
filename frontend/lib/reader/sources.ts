@@ -1,6 +1,6 @@
 import type { BookSyncAudioAsset, RelativePackagePath } from "../booksync/types";
 import { deleteLocalBook, listLocalBooks, readPackageFile, verifyLocalBook, type LocalBookRecord } from "./library";
-import { listRemoteBooks, oraclePlayableAudio, prefetchOracleAudio, readOraclePackageFile, removeOracleBook, type RemoteBookRecord } from "./oracle-library";
+import { listRemoteBooks, oraclePlayableAudio, prefetchRemoteAudioWindow, readOraclePackageFile, removeOracleBook, setRemoteAudioCacheWindow, type RemoteBookRecord } from "./oracle-library";
 
 export type ReaderBookRecord = LocalBookRecord | RemoteBookRecord;
 
@@ -39,11 +39,15 @@ export async function removeReaderBook(record: ReaderBookRecord) {
   else await deleteLocalBook(record.book_id);
 }
 
-export async function playableAudio(record: ReaderBookRecord, asset: BookSyncAudioAsset) {
-  if (isRemoteBook(record)) return oraclePlayableAudio(record, asset);
+export async function playableAudio(record: ReaderBookRecord, asset: BookSyncAudioAsset, signal?: AbortSignal) {
+  if (isRemoteBook(record)) return oraclePlayableAudio(record, asset, signal);
   return { kind: "blob" as const, blob: await readPackageFile(record.book_id, asset.path), cached: true };
 }
 
-export async function prefetchAudio(record: ReaderBookRecord, asset: BookSyncAudioAsset, signal?: AbortSignal) {
-  if (isRemoteBook(record)) await prefetchOracleAudio(record, asset, signal);
+export async function prepareAudioCacheWindow(record: ReaderBookRecord, assets: BookSyncAudioAsset[], currentAssetId: string) {
+  if (isRemoteBook(record)) await setRemoteAudioCacheWindow(record, assets, currentAssetId);
+}
+
+export async function prefetchAudioWindow(record: ReaderBookRecord, assets: BookSyncAudioAsset[], currentAssetId: string, signal?: AbortSignal) {
+  if (isRemoteBook(record)) await prefetchRemoteAudioWindow(record, assets, currentAssetId, signal);
 }

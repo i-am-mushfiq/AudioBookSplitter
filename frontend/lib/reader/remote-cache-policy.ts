@@ -1,4 +1,6 @@
 export const REMOTE_CACHE_LIMIT_BYTES = Math.floor(1.5 * 1024 ** 3);
+export const REMOTE_CACHE_PREVIOUS_SESSIONS = 2;
+export const REMOTE_CACHE_NEXT_SESSIONS = 3;
 
 export interface CachePolicyEntry {
   key: string;
@@ -10,6 +12,30 @@ export interface CacheEvictionPlan {
   cacheable: boolean;
   evict: string[];
   total_after: number;
+}
+
+export interface SessionCacheWindow {
+  retain_indexes: number[];
+  prefetch_indexes: number[];
+}
+
+/**
+ * Keep a bounded moving audio window. Retention is ordered by the audiobook,
+ * while background fetching prioritizes forward playback and then rewind.
+ */
+export function planSessionCacheWindow(
+  sessionCount: number,
+  currentIndex: number,
+  previous = REMOTE_CACHE_PREVIOUS_SESSIONS,
+  next = REMOTE_CACHE_NEXT_SESSIONS,
+): SessionCacheWindow {
+  if (sessionCount <= 0 || currentIndex < 0 || currentIndex >= sessionCount) return { retain_indexes: [], prefetch_indexes: [] };
+  const start = Math.max(0, currentIndex - previous);
+  const end = Math.min(sessionCount - 1, currentIndex + next);
+  const retain_indexes = Array.from({ length: end - start + 1 }, (_, offset) => start + offset);
+  const forward = Array.from({ length: end - currentIndex }, (_, offset) => currentIndex + offset + 1);
+  const backward = Array.from({ length: currentIndex - start }, (_, offset) => currentIndex - offset - 1);
+  return { retain_indexes, prefetch_indexes: [...forward, ...backward] };
 }
 
 /**

@@ -32,13 +32,14 @@ The token is supplied at runtime and is never compiled into the IPA, uploaded pa
 Hugging Face private files require an `Authorization` header. An HTML audio element cannot attach that header to an ordinary source URL, so BookSync performs an authenticated fetch for the current session, verifies byte length and SHA-256 against the manifest, stores it under the managed cache, and plays the resulting local blob URL.
 
 - The whole book is never downloaded automatically.
-- Only the current session and one following prefetched session are fetched.
+- The managed audio window contains the previous 2 sessions, current session, and next 3 sessions (fewer at book boundaries).
+- Audio outside the active window is deleted immediately, including sessions cached from another remote book.
 - Oracle and Hugging Face share one 1.5 GiB managed cache.
-- The oldest cache turns are released first.
+- The 1.5 GiB cap is an emergency ceiling, not a storage target; FIFO eviction remains a final fallback if the active window itself is unusually large.
 - Chapter HTML, overlays, and audio are validated before use.
 - Hugging Face byte ranges remain available through the provider contract for future resumable session caching.
 
-First playback can wait for the current session download. Resumable sub-session caching and native streaming authorization are later improvements.
+First playback can wait for the current session download. Forward sessions are prefetched before rewind sessions. Resumable sub-session caching and native streaming authorization are later improvements.
 
 ## Publish a package
 

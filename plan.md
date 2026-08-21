@@ -467,18 +467,17 @@ The Oracle MVP currently caches:
 
 - Current chapter content
 - Current chapter overlay
-- The following audio session only
+- Previous 2, current, and next 3 audio sessions (bounded at book edges)
 - Cover image and small library metadata
 - No complete remote book automatically
 
-The current managed remote cache has a hard 1.5 GiB limit and FIFO/round-robin eviction. Every cached object receives one monotonically increasing turn; when adding another object would exceed the cap, the oldest turns are released first. Remote assets are checksum-validated before entering the cache.
+The managed remote cache proactively deletes audio outside the active six-session window, including stale sessions from other remote books. The hard 1.5 GiB limit remains an emergency ceiling with FIFO/round-robin eviction as the final fallback. Remote assets are checksum-validated before entering the cache.
 
 Advanced caching is deliberately deferred. It needs:
 
 - Configurable size limits
 - Least-recently-used eviction
 - Per-book offline pinning
-- Current-session write-through without a duplicate network transfer
 - Resumable chunk storage and partial-download recovery
 - Network-aware and storage-pressure-aware prefetch depth
 - Cache inspection, manual clearing, and per-provider priorities
@@ -501,11 +500,11 @@ Implemented MVP behavior:
 
 - Persistent Oracle connection and remote library discovery
 - Manifest-first loading with schema and path validation
-- Direct media-element audio playback from Oracle range-capable URLs
+- Checksum-validated current-session write-through playback
 - On-demand chapter and overlay retrieval
 - Checksum validation before remote objects enter IndexedDB
-- Prefetch of only the following audio session
-- Hard 1.5 GiB managed cache with deterministic round-robin eviction
+- Previous-2/current/next-3 moving audio window with proactive pruning
+- Hard 1.5 GiB emergency ceiling with deterministic round-robin fallback
 - Provider disconnect and per-book local cache release
 - Coexistence with fully offline ZIP imports and existing progress/highlighting
 
@@ -713,9 +712,9 @@ Deliverables:
 - Read-only Oracle PAR connection UI
 - Remote/local unified library
 - Manifest-first chapter loading
-- Range-capable session streaming
-- Following-session prefetch
-- 1.5 GiB round-robin cache ceiling
+- Session-scoped remote playback
+- Previous-2/current/next-3 audio window
+- Proactive outside-window eviction plus a 1.5 GiB emergency ceiling
 - Remote checksum validation and disconnect flow
 
 Remaining hardening:

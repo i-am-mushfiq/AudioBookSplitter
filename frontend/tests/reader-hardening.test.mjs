@@ -175,7 +175,22 @@ test("discovers a private Hugging Face book with bearer auth and supports ranges
   }
 });
 
-test("remote cache evicts in round-robin order and stays below 1.5 GiB", () => {
+test("remote audio cache retains previous 2, current, and next 3 sessions", () => {
+  assert.deepEqual(cachePolicy.planSessionCacheWindow(10, 4), {
+    retain_indexes: [2, 3, 4, 5, 6, 7],
+    prefetch_indexes: [5, 6, 7, 3, 2],
+  });
+  assert.deepEqual(cachePolicy.planSessionCacheWindow(10, 0), {
+    retain_indexes: [0, 1, 2, 3],
+    prefetch_indexes: [1, 2, 3],
+  });
+  assert.deepEqual(cachePolicy.planSessionCacheWindow(10, 9), {
+    retain_indexes: [7, 8, 9],
+    prefetch_indexes: [8, 7],
+  });
+});
+
+test("remote cache still enforces the 1.5 GiB emergency ceiling", () => {
   const gib = 1024 ** 3;
   const plan = cachePolicy.planRoundRobinEviction([
     { key: "first", size: 0.6 * gib, sequence: 1 },

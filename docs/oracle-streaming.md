@@ -52,15 +52,16 @@ OCI's Object Storage API returns fixed CORS headers, including a wildcard allowe
 
 ## Current cache policy
 
-- Uncached audio is streamed directly from Oracle using the media element's HTTP range requests.
-- Only the following audio session is prefetched, never the complete book.
-- Chapter HTML, overlays, covers, and prefetched sessions are checksum-validated before entering IndexedDB.
+- The current session is downloaded and checksum-validated before playback.
+- The audio window contains the previous 2 sessions, current session, and next 3 sessions, never the complete book.
+- Audio outside the active window is proactively removed; next sessions are prefetched before previous sessions.
+- Chapter HTML, overlays, covers, and cached sessions are checksum-validated before entering IndexedDB.
 - The managed remote cache has a hard 1.5 GiB limit.
-- Cache objects receive a monotonically increasing turn number; the oldest turns are released first when a new object would exceed the limit.
+- The hard limit is an emergency fallback. Normal storage use is bounded by the six-session window rather than allowed to grow toward 1.5 GiB.
 - Offline ZIP imports are user-owned library data and are separate from the 1.5 GiB remote cache.
 
 WebKit may retain small transient network buffers outside BookSync's managed IndexedDB cache. iOS can also reclaim website data under severe storage pressure.
 
 ## Later cache work
 
-Advanced caching remains a separate milestone. It includes configurable limits, current-session write-through without duplicate network traffic, resumable chunk caching, offline book pinning, network-aware prefetch depth, cache inspection and manual clearing, and provider-aware cache prioritization.
+Advanced caching remains a separate milestone. It includes configurable limits, resumable chunk caching, offline book pinning, network-aware prefetch depth, cache inspection and manual clearing, and provider-aware cache prioritization.

@@ -74,7 +74,7 @@ For personal recall marks, turn on **✦ Highlight** and tap a sentence once. Ta
 
 The reader can now combine offline ZIP imports with an Oracle-hosted library. On the Library screen, select **Oracle** and paste a read-only OCI Object Storage bucket/prefix pre-authenticated URL or its complete `library.json` URL.
 
-Remote books do not download as complete audiobooks. BookSync loads their manifest and current chapter metadata, streams an uncached audio session from Oracle, and prefetches only the following session. Its managed remote cache is capped at **1.5 GiB** and releases the oldest cached turns first.
+Remote books do not download as complete audiobooks. BookSync loads their manifest and current chapter metadata, then maintains a moving audio window containing the previous 2 sessions, the current session, and the next 3 sessions. Audio outside that window is released proactively. The managed remote cache retains its **1.5 GiB** emergency ceiling.
 
 To prepare and upload a library:
 
@@ -101,7 +101,7 @@ For the current personal library:
 mdrahman/booksync-library
 ```
 
-Private audio is fetched with bearer authentication, checked against the BookSync manifest, and played as a verified session blob. BookSync downloads the current session rather than the entire audiobook and prefetches only the next session. Oracle and Hugging Face share the same **1.5 GiB** round-robin cache ceiling.
+Private audio is fetched with bearer authentication, checked against the BookSync manifest, and played as a verified session blob. BookSync retains previous 2/current/next 3 sessions and removes outside-window audio instead of filling storage up to the limit. Oracle and Hugging Face share the same **1.5 GiB** emergency ceiling.
 
 Publish a completed expanded package and update the remote catalog in one validated operation:
 
@@ -151,7 +151,7 @@ The iPhone project requires macOS/Xcode for a local signed build. See [frontend/
 - **Windows desktop app:** not currently reliable. Earlier BookSync Studio installer builds can open as a blank/black window. Do not use them for processing; use the local web app above instead. The desktop app is not part of the supported `main` branch release path.
 - **Unsigned iPhone IPA:** downloads directly but cannot be installed on an iPhone. Apple signing is mandatory for device installation, TestFlight, or App Store distribution.
 - **Local iPhone storage:** the reader requests persistent storage, but iOS can still reclaim local data under severe storage pressure. Keep the original `.booksync.zip` so you can re-import it.
-- **Oracle MVP cache:** the 1.5 GiB cap applies to BookSync's managed remote cache, not deliberately imported offline ZIPs or WebKit's small transient networking buffers. Current-session write-through, resumable chunk caching, offline pinning, and network-aware prefetch remain planned work.
+- **Remote cache:** the previous-2/current/next-3 session window minimizes normal storage use; the 1.5 GiB cap is a final safety boundary. The cap applies to BookSync's managed remote cache, not deliberately imported offline ZIPs or WebKit's small transient networking buffers. Resumable chunk caching, offline pinning, and network-aware depth remain planned work.
 - **Hugging Face token storage:** the token is entered at runtime and never embedded in the IPA or package, but the Capacitor web reader currently persists it in its app-local IndexedDB so the library survives relaunches. Use a fine-grained read-only token dedicated to this dataset; native Keychain storage remains a hardening improvement.
 - **Hugging Face session startup:** authenticated private media cannot be assigned to the audio element as an unauthenticated URL. The current session is downloaded and checksum-validated before playback begins, so first play may pause briefly on a slow connection. Whole books are not downloaded.
 - **Long audiobook processing:** transcription is intentionally windowed to avoid whole-book memory exhaustion. It can still take a long time, especially on CPU.

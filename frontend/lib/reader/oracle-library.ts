@@ -2,7 +2,7 @@ import type { BookSyncAudioAsset, BookSyncManifest, RelativePackagePath } from "
 import { OracleStorageProvider, oracleConfigFromUrl, type OracleLibraryConfig } from "../booksync/oracle-provider";
 import { HuggingFaceStorageProvider, huggingFaceConfig, type HuggingFaceLibraryConfig } from "../booksync/huggingface-provider";
 import { declaredFiles, normalizePackagePath, validateDeclaredBlob, validateOverlay } from "./validation";
-import { planRoundRobinEviction, REMOTE_CACHE_LIMIT_BYTES } from "./remote-cache-policy";
+import { planRoundRobinEviction, planSessionCacheWindow, REMOTE_CACHE_LIMIT_BYTES } from "./remote-cache-policy";
 
 const DB_NAME = "booksync-remote-library";
 const DB_VERSION = 1;
@@ -11,6 +11,7 @@ const BOOKS = "books";
 const CACHE = "cache";
 const SETTINGS = "settings";
 const CACHE_STATE_KEY = "cache-state";
+const ACTIVE_AUDIO_WINDOW_KEY = "active-audio-window";
 
 export interface OracleBookRecord {
   record_id: string;
@@ -36,6 +37,7 @@ export type RemoteLibraryConfig = OracleLibraryConfig | HuggingFaceLibraryConfig
 export interface OracleCacheStats {
   bytes: number;
   entries: number;
+  audio_entries: number;
   limit_bytes: number;
 }
 
@@ -48,6 +50,12 @@ interface CacheRecord {
   size: number;
   sequence: number;
   cached_at: string;
+  kind?: "audio" | "package";
+}
+
+interface ActiveAudioWindowRecord {
+  key: typeof ACTIVE_AUDIO_WINDOW_KEY;
+  allowed_keys: string[];
 }
 
 function request<T>(value: IDBRequest<T>): Promise<T> {
@@ -99,6 +107,18 @@ async function simpleTransaction<T>(store: string, mode: IDBTransactionMode, act
 
 function recordId(providerId: string, bookId: string) { return `${providerId}:${bookId}`; }
 function cacheKey(record: RemoteBookRecord, path: RelativePackagePath) { return `${record.provider_id}:${record.book_id}:${path}`; }
+function isAudioCacheRecord(record: CacheRecord) {
+  return record.kind === "audio" || /\.(?:aac|flac|m4a|m4b|mp3|ogg|opus|wav)$/i.test(record.path);
+}
+
+function audioWindow(record: RemoteBookRecord, assets: BookSyncAudioAsset[], currentAssetId: string) {
+  const currentIndex = assets.findIndex((asset) => asset.id === currentAssetId);
+  const plan = planSessionCacheWindow(assets.length, currentIndex);
+  return {
+    allowedKeys: plan.retain_indexes.map((index) => cacheKey(record, assets[index].path)),
+    prefetchAssets: plan.prefetch_indexes.map((index) => assets[index]),
+  };
+}
 
 export async function listOracleBooks(): Promise<OracleBookRecord[]> {
   return (await listRemoteBooks()).filter((book): book is OracleBookRecord => book.source === "oracle");
@@ -219,27 +239,48 @@ async function getCached(record: RemoteBookRecord, path: RelativePackagePath) {
   return simpleTransaction(CACHE, "readonly", (store) => store.get(cacheKey(record, path))) as Promise<CacheRecord | undefined>;
 }
 
-async function putCached(record: RemoteBookRecord, path: RelativePackagePath, blob: Blob) {
+async function putCached(record: RemoteBookRecord, path: RelativePackagePath, blob: Blob, kind: CacheRecord["kind"] = "package") {
   if (blob.size > REMOTE_CACHE_LIMIT_BYTES) return false;
   const db = await openDatabase();
   try {
     const tx = db.transaction([CACHE, SETTINGS], "readwrite");
     const cache = tx.objectStore(CACHE);
     const settings = tx.objectStore(SETTINGS);
-    const [existing, state] = await Promise.all([
+    const [existing, state, activeWindow] = await Promise.all([
       request(cache.getAll()) as Promise<CacheRecord[]>,
       request(settings.get(CACHE_STATE_KEY)) as Promise<{ key: string; next_sequence: number } | undefined>,
+      request(settings.get(ACTIVE_AUDIO_WINDOW_KEY)) as Promise<ActiveAudioWindowRecord | undefined>,
     ]);
     const sequence = state?.next_sequence ?? 1;
     const key = cacheKey(record, path);
+    if (kind === "audio" && activeWindow && !activeWindow.allowed_keys.includes(key)) {
+      await transactionDone(tx);
+      return false;
+    }
     const plan = planRoundRobinEviction(existing, { key, size: blob.size, sequence });
     if (!plan.cacheable) { tx.abort(); return false; }
     for (const evicted of plan.evict) cache.delete(evicted);
-    cache.put({ key, provider_id: record.provider_id, book_id: record.book_id, path, blob, size: blob.size, sequence, cached_at: new Date().toISOString() } satisfies CacheRecord);
+    cache.put({ key, provider_id: record.provider_id, book_id: record.book_id, path, blob, size: blob.size, sequence, cached_at: new Date().toISOString(), kind } satisfies CacheRecord);
     settings.put({ key: CACHE_STATE_KEY, next_sequence: sequence + 1 });
     await transactionDone(tx);
     return true;
   } finally { db.close(); }
+}
+
+export async function setRemoteAudioCacheWindow(record: RemoteBookRecord, assets: BookSyncAudioAsset[], currentAssetId: string) {
+  const { allowedKeys, prefetchAssets } = audioWindow(record, assets, currentAssetId);
+  if (!allowedKeys.length) throw new Error(`The current audio session ${currentAssetId} is not in this book's manifest.`);
+  const allowed = new Set(allowedKeys);
+  const db = await openDatabase();
+  try {
+    const tx = db.transaction([CACHE, SETTINGS], "readwrite");
+    const cache = tx.objectStore(CACHE);
+    const entries = await request(cache.getAll()) as CacheRecord[];
+    for (const entry of entries) if (isAudioCacheRecord(entry) && !allowed.has(entry.key)) cache.delete(entry.key);
+    tx.objectStore(SETTINGS).put({ key: ACTIVE_AUDIO_WINDOW_KEY, allowed_keys: allowedKeys } satisfies ActiveAudioWindowRecord);
+    await transactionDone(tx);
+  } finally { db.close(); }
+  return prefetchAssets;
 }
 
 async function fetchDeclaredBlob(response: Response, expectedBytes: number, mediaType: string, label: string) {
@@ -278,16 +319,15 @@ export async function readOraclePackageFile(record: RemoteBookRecord, path: Rela
   const blob = await fetchDeclaredBlob(response, asset.byte_length, asset.media_type, record.source === "huggingface" ? "Hugging Face" : "Oracle");
   await validateDeclaredBlob(asset, blob);
   if (safePath.startsWith("overlays/")) await validateOverlay(JSON.parse(await blob.text()), record.manifest, safePath);
-  await putCached(record, safePath, blob);
+  const kind = record.manifest.audio_assets.some((audio) => audio.path === safePath) ? "audio" : "package";
+  await putCached(record, safePath, blob, kind);
   return blob;
 }
 
-export async function oraclePlayableAudio(record: RemoteBookRecord, asset: BookSyncAudioAsset) {
+export async function oraclePlayableAudio(record: RemoteBookRecord, asset: BookSyncAudioAsset, signal?: AbortSignal) {
   const cached = await getCached(record, asset.path);
   if (cached) return { kind: "blob" as const, blob: cached.blob, cached: true };
-  if (record.source === "huggingface") return { kind: "blob" as const, blob: await readOraclePackageFile(record, asset.path), cached: false };
-  const provider = await providerFor(record);
-  return { kind: "remote" as const, url: (provider as OracleStorageProvider).objectUrl(record.book_id, record.object_root, asset.path), cached: false };
+  return { kind: "blob" as const, blob: await readOraclePackageFile(record, asset.path, signal), cached: false };
 }
 
 export async function prefetchOracleAudio(record: RemoteBookRecord, asset: BookSyncAudioAsset, signal?: AbortSignal) {
@@ -296,7 +336,19 @@ export async function prefetchOracleAudio(record: RemoteBookRecord, asset: BookS
   await readOraclePackageFile(record, asset.path, signal);
 }
 
+export async function prefetchRemoteAudioWindow(record: RemoteBookRecord, assets: BookSyncAudioAsset[], currentAssetId: string, signal?: AbortSignal) {
+  const prefetchAssets = await setRemoteAudioCacheWindow(record, assets, currentAssetId);
+  for (const asset of prefetchAssets) {
+    if (signal?.aborted) return;
+    try { await prefetchOracleAudio(record, asset, signal); }
+    catch (error) {
+      if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) return;
+      throw error;
+    }
+  }
+}
+
 export async function getOracleCacheStats(): Promise<OracleCacheStats> {
   const entries = await simpleTransaction(CACHE, "readonly", (store) => store.getAll()) as CacheRecord[];
-  return { bytes: entries.reduce((sum, item) => sum + item.size, 0), entries: entries.length, limit_bytes: REMOTE_CACHE_LIMIT_BYTES };
+  return { bytes: entries.reduce((sum, item) => sum + item.size, 0), entries: entries.length, audio_entries: entries.filter(isAudioCacheRecord).length, limit_bytes: REMOTE_CACHE_LIMIT_BYTES };
 }
