@@ -12,8 +12,13 @@ on:
           - development
           - ad-hoc
           - app-store
+      publish_release:
+        description: Publish a direct IPA download as a GitHub Release asset
+        required: true
+        default: true
+        type: boolean
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   ipa:
@@ -83,10 +88,33 @@ jobs:
           xcodebuild -project frontend/ios/App/App.xcodeproj -scheme App -configuration Release -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/BookSync.xcarchive" DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" CODE_SIGN_STYLE=Manual PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" archive
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/BookSync.xcarchive" -exportOptionsPlist "$export_options" -exportPath "$RUNNER_TEMP/ipa"
 
+      - name: Name IPA for this build
+        shell: bash
+        run: |
+          app_version=$(node -p "require('./frontend/package.json').version")
+          source_ipa=$(find "$RUNNER_TEMP/ipa" -maxdepth 1 -type f -name '*.ipa' -print -quit)
+          test -n "$source_ipa"
+          ipa_name="BookSync-Reader-v${app_version}-${EXPORT_METHOD}-r${GITHUB_RUN_NUMBER}.ipa"
+          ipa_path="$RUNNER_TEMP/$ipa_name"
+          cp "$source_ipa" "$ipa_path"
+          echo "IPA_NAME=$ipa_name" >> "$GITHUB_ENV"
+          echo "IPA_PATH=$ipa_path" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=ios-v${app_version}-${EXPORT_METHOD}-r${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: BookSync-Reader-${{ github.run_number }}-${{ env.EXPORT_METHOD }}-ipa
-          path: ${{ runner.temp }}/ipa/*.ipa
+          name: BookSync-Reader-v${{ github.run_number }}-${{ env.EXPORT_METHOD }}-ipa
+          path: ${{ env.IPA_PATH }}
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish direct IPA download
+        if: inputs.publish_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "$RELEASE_TAG" "$IPA_PATH#$IPA_NAME" \
+            --title "BookSync Reader v${RELEASE_TAG#ios-v}" \
+            --notes "${EXPORT_METHOD} signed iPhone build from GitHub Actions run #${GITHUB_RUN_NUMBER}."

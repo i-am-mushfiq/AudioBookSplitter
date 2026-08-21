@@ -130,6 +130,8 @@ npm run mobile:sync
 
 Android debug APK builds with `npm run android:apk` after installing JDK 17 and the Android SDK. iPhone IPA export requires macOS, Xcode, and an Apple Developer signing team; see [`frontend/ios/README.md`](frontend/ios/README.md).
 
+When either iPhone workflow is manually dispatched with **Publish release** enabled, it creates a numbered GitHub Release asset for direct `.ipa` download (for example, `BookSync-Reader-v0.1.0-development-r12.ipa`). GitHub Actions artifacts remain as a 14-day fallback, but GitHub always wraps artifact downloads in a ZIP. The unsigned workflow's direct IPA proves compilation only; it still cannot install on a device without Apple signing.
+
 ## Output structure
 
 The selected output directory contains:
