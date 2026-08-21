@@ -136,6 +136,22 @@ def prepare_package_root(output_root: Path, book_name: str) -> Path:
     return package_root
 
 
+def archive_booksync_package(package_root: Path) -> Path:
+    """Create the portable ZIP consumed by the desktop, Android, and iOS readers."""
+    if package_root.suffix != ".booksync":
+        raise ValueError("BookSync packages must be archived from a .booksync directory")
+    archive_path = package_root.with_suffix(".booksync.zip")
+    temporary_base = package_root.parent / f".{package_root.name}.archive"
+    temporary_path = Path(f"{temporary_base}.zip")
+    if temporary_path.exists():
+        temporary_path.unlink()
+    if archive_path.exists():
+        archive_path.unlink()
+    created = Path(shutil.make_archive(str(temporary_base), "zip", root_dir=package_root))
+    created.replace(archive_path)
+    return archive_path
+
+
 def cut_for_time(cuts: list[Cut], seconds: float) -> Cut | None:
     for cut in cuts:
         if cut.start <= seconds < cut.end or (cut is cuts[-1] and seconds == cut.end):
@@ -475,4 +491,5 @@ def build_booksync_package(
     if issues:
         formatted = "\n".join(f"- {issue}" for issue in issues)
         raise RuntimeError(f"Generated BookSync package failed validation:\n{formatted}")
+    archive_booksync_package(package_root)
     return package_root

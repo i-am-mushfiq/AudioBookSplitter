@@ -99,6 +99,8 @@ Open `http://localhost:3000`. The splitter accepts a PDF or EPUB plus an audiobo
 
 The synchronized reader is available at `http://localhost:3000/reader`.
 
+Every processed book now also produces a portable `<Book_Name>.booksync.zip`. This is the full reader package—source publication, chapter content, synchronized audio, overlays, transcript, quality reports, manifest, and checksums—and can be imported on desktop, Android, or iPhone.
+
 ## Synchronized reader
 
 Import a processed BookSync ZIP in `/reader` to:
@@ -114,6 +116,17 @@ Import a processed BookSync ZIP in `/reader` to:
 Older BookSync packages without the optional `words` overlay field continue to work with sentence-only highlighting. Reprocess an older source pair to add word highlighting.
 
 Reader imports validate schemas, exact sizes, SHA-256 checksums, paths, archive limits, timeline consistency, and word timing order before committing data atomically to IndexedDB. EPUB markup is sanitized with DOMPurify.
+
+## Mobile targets
+
+The reader has one shared static PWA bundle with Capacitor projects for Android and iPhone. Build the shared mobile bundle and synchronize native projects:
+
+```powershell
+cd .\frontend
+npm run mobile:sync
+```
+
+Android debug APK builds with `npm run android:apk` after installing JDK 17 and the Android SDK. iPhone IPA export requires macOS, Xcode, and an Apple Developer signing team; see [`frontend/ios/README.md`](frontend/ios/README.md).
 
 ## Output structure
 
