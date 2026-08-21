@@ -12,6 +12,8 @@ const vite = await createServer({ root, configFile: false, appType: "custom", se
 after(() => vite.close());
 const validation = await vite.ssrLoadModule("/lib/reader/validation.ts");
 const content = await vite.ssrLoadModule("/lib/reader/content.ts");
+const oracle = await vite.ssrLoadModule("/lib/booksync/oracle-provider.ts");
+const cachePolicy = await vite.ssrLoadModule("/lib/reader/remote-cache-policy.ts");
 const fixtureRoot = resolve(root, "..", "examples", "minimal.booksync");
 
 test("keeps chapter HTML stable while audio timing updates", async () => {
@@ -93,6 +95,48 @@ test("identifies only real in-chapter session transitions", () => {
     { sentence_id: "s5", audio_locator: locator("aud_3", 1_200_000) },
   ];
   assert.deepEqual(content.sessionTransitionSentenceIds(entries), ["s3", "s5"]);
+});
+
+test("builds safe Oracle catalog and object URLs", () => {
+  const endpoint = oracle.parseOracleLibraryEndpoint("https://objectstorage.ap-dhaka-1.oraclecloud.com/p/token/n/ns/b/books/o/");
+  assert.equal(endpoint.catalog_url, "https://objectstorage.ap-dhaka-1.oraclecloud.com/p/token/n/ns/b/books/o/library.json");
+  assert.equal(oracle.resolveOracleObjectUrl(endpoint.object_base_url, "books/My Book/audio/session 01.mp3"), "https://objectstorage.ap-dhaka-1.oraclecloud.com/p/token/n/ns/b/books/o/books/My%20Book/audio/session%2001.mp3");
+  assert.throws(() => oracle.parseOracleLibraryEndpoint("http://example.com/library.json"), /HTTPS/);
+  assert.throws(() => oracle.resolveOracleObjectUrl(endpoint.object_base_url, "../escape.mp3"), /Unsafe package path/);
+});
+
+test("discovers an Oracle book through the catalog without listing the bucket", async () => {
+  const manifestText = await readFile(resolve(fixtureRoot, "manifest.json"), "utf8");
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.endsWith("/library.json")) return new Response(JSON.stringify({ format: "booksync-oracle-library", schema_version: 1, books: [{ manifest_path: "Synthetic.booksync/manifest.json" }] }));
+    if (url.endsWith("/Synthetic.booksync/manifest.json")) return new Response(manifestText);
+    return new Response("missing", { status: 404 });
+  };
+  try {
+    const provider = new oracle.OracleStorageProvider({ id: "oracle_test", name: "Test", catalog_url: "https://objects.example/library.json", object_base_url: "https://objects.example/", connected_at: new Date(0).toISOString() });
+    const books = await provider.discover();
+    assert.equal(books.length, 1);
+    assert.equal(books[0].title, "Synthetic Contract Fixture");
+    assert.deepEqual(requests, ["https://objects.example/library.json", "https://objects.example/Synthetic.booksync/manifest.json"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("remote cache evicts in round-robin order and stays below 1.5 GiB", () => {
+  const gib = 1024 ** 3;
+  const plan = cachePolicy.planRoundRobinEviction([
+    { key: "first", size: 0.6 * gib, sequence: 1 },
+    { key: "second", size: 0.6 * gib, sequence: 2 },
+  ], { key: "third", size: 0.6 * gib, sequence: 3 });
+  assert.equal(plan.cacheable, true);
+  assert.deepEqual(plan.evict, ["first"]);
+  assert.ok(plan.total_after <= cachePolicy.REMOTE_CACHE_LIMIT_BYTES);
+  assert.equal(cachePolicy.planRoundRobinEviction([], { key: "oversized", size: 2 * gib, sequence: 1 }).cacheable, false);
 });
 
 const privatePackage = resolve(root, "..", "test1-milestone2-output", "Animal_Farm.booksync");

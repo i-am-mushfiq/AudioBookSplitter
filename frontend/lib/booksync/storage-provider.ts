@@ -4,7 +4,7 @@ import type {
   RelativePackagePath,
 } from "./types";
 
-export type StorageProviderKind = "local" | "google-drive" | "telegram" | "webdav";
+export type StorageProviderKind = "local" | "oracle" | "google-drive" | "telegram" | "webdav";
 
 export interface StorageProviderCapabilities {
   range_reads: boolean;

@@ -455,28 +455,32 @@ interface StorageProvider {
 Planned providers:
 
 1. `LocalStorageProvider`
-2. `GoogleDriveProvider`
-3. `TelegramProvider`
-4. `WebDavProvider`
+2. `OracleStorageProvider` — read-only streaming MVP implemented
+3. `GoogleDriveProvider`
+4. `TelegramProvider`
+5. `WebDavProvider`
 
 ### Cache policy
 
-The reader should cache:
+The Oracle MVP currently caches:
 
-- Manifest and chapter metadata
 - Current chapter content
 - Current chapter overlay
-- Current audio asset
-- At least the next two audio assets
+- The following audio session only
 - Cover image and small library metadata
+- No complete remote book automatically
 
-The cache needs:
+The current managed remote cache has a hard 1.5 GiB limit and FIFO/round-robin eviction. Every cached object receives one monotonically increasing turn; when adding another object would exceed the cap, the oldest turns are released first. Remote assets are checksum-validated before entering the cache.
+
+Advanced caching is deliberately deferred. It needs:
 
 - Configurable size limits
 - Least-recently-used eviction
 - Per-book offline pinning
-- Checksum validation
-- Partial-download recovery
+- Current-session write-through without a duplicate network transfer
+- Resumable chunk storage and partial-download recovery
+- Network-aware and storage-pressure-aware prefetch depth
+- Cache inspection, manual clearing, and per-provider priorities
 - Clear distinction between cached copies and remote originals
 
 ### Credentials and security
@@ -488,9 +492,27 @@ The cache needs:
 - Provider access should use the smallest practical permission scope.
 - Disconnecting a provider should revoke or delete local credentials without deleting remote books.
 
+## Oracle Object Storage strategy
+
+Oracle is the first remote provider implementation. It uses expanded BookSync package directories plus a small root `library.json` catalog. A read-only bucket or prefix pre-authenticated request provides bearer-URL access without embedding OCI API credentials in the app.
+
+Implemented MVP behavior:
+
+- Persistent Oracle connection and remote library discovery
+- Manifest-first loading with schema and path validation
+- Direct media-element audio playback from Oracle range-capable URLs
+- On-demand chapter and overlay retrieval
+- Checksum validation before remote objects enter IndexedDB
+- Prefetch of only the following audio session
+- Hard 1.5 GiB managed cache with deterministic round-robin eviction
+- Provider disconnect and per-book local cache release
+- Coexistence with fully offline ZIP imports and existing progress/highlighting
+
+Later Oracle work includes signed-user authentication beyond bearer PAR URLs, automated upload/rotation from the desktop processor, background refresh, current-session chunk caching, offline pinning, cache controls, and network interruption recovery.
+
 ## Google Drive strategy
 
-Google Drive should be the first remote provider because blob files support partial downloads using HTTP byte ranges.
+Google Drive should be the next remote provider after the Oracle MVP because blob files support partial downloads using HTTP byte ranges.
 
 Planned behavior:
 
@@ -681,6 +703,30 @@ Deliverables:
 Exit gate:
 
 - Multiple books can be managed without stale UI state or accidental deletion of source files.
+
+### Milestone 5.5: Oracle remote streaming — MVP implemented
+
+Deliverables:
+
+- Expanded-package `library.json` catalog
+- Read-only Oracle PAR connection UI
+- Remote/local unified library
+- Manifest-first chapter loading
+- Range-capable session streaming
+- Following-session prefetch
+- 1.5 GiB round-robin cache ceiling
+- Remote checksum validation and disconnect flow
+
+Remaining hardening:
+
+- Physical-device interruption and expired-PAR testing
+- Current-session resumable chunk cache
+- Configurable cache controls and offline pinning
+- Automated upload and catalog refresh
+
+Exit gate:
+
+- An Oracle-hosted book begins playback without downloading the complete audiobook, and the managed remote cache cannot exceed 1.5 GiB.
 
 ### Milestone 6: Google Drive
 
@@ -927,7 +973,7 @@ The following decisions are recommended unless testing produces contrary evidenc
 - Use sentence highlighting before word highlighting.
 - Complete EPUB support before PDF support.
 - Support text-based PDFs before OCR PDFs.
-- Use Google Drive before Telegram for remote playback.
+- Use Oracle Object Storage as the first remote streaming provider; implement Google Drive before Telegram afterward.
 - Treat Telegram as cached personal storage initially.
 - Store expanded packages remotely; use ZIP for transfer and download.
 - Separate logical chapters from transport-sized audio objects.

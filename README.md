@@ -70,6 +70,27 @@ The mobile reader uses larger type and touch targets, a compact audiobook player
 
 For personal recall marks, turn on **✦ Highlight** and tap a sentence once. Tap it again to remove the mark. Personal highlights persist with the local book, remain visually distinct from the live narrator highlight, and are available from **Contents → Highlights**.
 
+## Streaming from Oracle Object Storage
+
+The reader can now combine offline ZIP imports with an Oracle-hosted library. On the Library screen, select **Oracle** and paste a read-only OCI Object Storage bucket/prefix pre-authenticated URL or its complete `library.json` URL.
+
+Remote books do not download as complete audiobooks. BookSync loads their manifest and current chapter metadata, streams an uncached audio session from Oracle, and prefetches only the following session. Its managed remote cache is capped at **1.5 GiB** and releases the oldest cached turns first.
+
+To prepare and upload a library:
+
+```powershell
+python .\tools\build_oracle_catalog.py "C:\Books\BookSyncCloud"
+
+oci os object bulk-upload `
+  --bucket-name BookSync `
+  --src-dir "C:\Books\BookSyncCloud" `
+  --storage-tier Standard `
+  --verify-checksum `
+  --overwrite
+```
+
+`BookSyncCloud` should contain the expanded `.booksync` directories produced next to each ZIP. Create an Oracle PAR with **object read** permission only; the URL is a bearer secret stored locally by the app. Detailed setup and cache behavior are in [docs/oracle-streaming.md](docs/oracle-streaming.md).
+
 ## Mobile apps
 
 Android and iPhone use the same reader bundle through Capacitor.
@@ -108,6 +129,7 @@ The iPhone project requires macOS/Xcode for a local signed build. See [frontend/
 - **Windows desktop app:** not currently reliable. Earlier BookSync Studio installer builds can open as a blank/black window. Do not use them for processing; use the local web app above instead. The desktop app is not part of the supported `main` branch release path.
 - **Unsigned iPhone IPA:** downloads directly but cannot be installed on an iPhone. Apple signing is mandatory for device installation, TestFlight, or App Store distribution.
 - **Local iPhone storage:** the reader requests persistent storage, but iOS can still reclaim local data under severe storage pressure. Keep the original `.booksync.zip` so you can re-import it.
+- **Oracle MVP cache:** the 1.5 GiB cap applies to BookSync's managed remote cache, not deliberately imported offline ZIPs or WebKit's small transient networking buffers. Current-session write-through, resumable chunk caching, offline pinning, and network-aware prefetch remain planned work.
 - **Long audiobook processing:** transcription is intentionally windowed to avoid whole-book memory exhaustion. It can still take a long time, especially on CPU.
 - **Alignment quality:** the audiobook must match the edition closely. Different abridgements, translations, skipped introductions, or inaccurate source chapter headings can reduce alignment quality.
 - **PDF structure:** EPUB normally provides cleaner chapters than PDF. Scanned/image-only PDFs may need OCR or a better source file.
