@@ -6,6 +6,11 @@
   --muted: #a7a7a7;
   --accent: #1ed760;
   --accent-ink: #07150c;
+  width: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
+  min-height: 0;
+  overscroll-behavior: none;
 }
 
 .reader-app button,
@@ -14,7 +19,7 @@
 .reader-app label:focus-within { outline: 3px solid #78eaa0; outline-offset: 3px; }
 
 .surface-library { display: block; background: var(--surface); color: #fff; overflow: hidden; }
-.library-home { position: relative; height: 100%; overflow-y: auto; padding: 38px max(28px, calc((100vw - 920px) / 2)) 140px; background: radial-gradient(circle at 82% -10%, #254c35 0, #121212 34%); }
+.library-home { position: relative; box-sizing: border-box; height: 100%; overflow-y: auto; padding: 38px max(28px, calc((100vw - 920px) / 2)) 140px; background: radial-gradient(circle at 82% -10%, #254c35 0, #121212 34%); overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .library-home-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding-bottom: 26px; border-bottom: 1px solid #333; }
 .library-home-header span { display: block; color: var(--accent); font-size: 11px; font-weight: 850; letter-spacing: .16em; }
 .library-home-header h1 { margin: 7px 0 0; font-size: clamp(42px, 7vw, 68px); line-height: .96; letter-spacing: -.055em; }
@@ -74,7 +79,7 @@
 .contents-trigger { min-height: 44px; border: 0; background: transparent; color: inherit; font-size: 14px; font-weight: 800; cursor: pointer; }
 .reader-back { justify-self: start; }
 .contents-trigger { justify-self: end; }
-.surface-reader .reader-stage { grid-column: 1; grid-row: 2; }
+.surface-reader .reader-stage { grid-column: 1; grid-row: 2; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .surface-reader .reader-tools { height: 62px; justify-content: space-between; padding: 0 24px; gap: 16px; }
 .chapter-location { max-width: 48%; display: block; overflow: hidden; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .chapter-location small,
