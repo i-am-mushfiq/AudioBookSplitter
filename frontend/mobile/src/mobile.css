@@ -3,13 +3,21 @@ body,
 #root {
   width: 100%;
   height: 100%;
+  min-height: 0;
   margin: 0;
   overflow: hidden;
+  overflow: clip;
   overscroll-behavior: none;
 }
 
-html { background: #121212; }
+html {
+  position: fixed;
+  inset: 0;
+  background: #121212;
+}
 body {
+  position: fixed;
+  inset: 0;
   box-sizing: border-box;
   padding: 0;
   background: #121212;
@@ -19,11 +27,12 @@ body {
   position: fixed;
   inset: 0;
   box-sizing: border-box;
+  contain: size layout paint;
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-.reader-app { height: 100%; max-height: 100%; min-height: 0; }
+.reader-app { position: relative; height: 100%; max-height: 100%; min-height: 0; overflow: hidden; }
 
 @media (max-width: 760px) {
   .reader-app.theme-paper,

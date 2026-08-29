@@ -5,6 +5,10 @@ const config: CapacitorConfig = {
   appName: "BookSync Reader",
   webDir: "mobile-dist",
   bundledWebRuntime: false,
+  ios: {
+    scrollEnabled: false,
+    contentInset: "never",
+  },
   android: {
     allowMixedContent: false,
     backgroundColor: "#10110f",

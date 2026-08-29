@@ -540,6 +540,7 @@ export default function ReaderPage() {
           {importing ? <button className="reader-cancel" onClick={() => importController.current?.abort()}>{importLabel} · Cancel</button> : <button className="reader-import" aria-label="Import BookSync ZIP" onClick={() => fileInputRef.current?.click()}><b aria-hidden="true">＋</b><span>Import book</span></button>}
         </div>
       </header>
+      <div className="library-scroll">
       {resumeBook && <button className="resume-card" aria-label={`Resume ${resumeBook.manifest.title}${isRemoteBook(resumeBook) ? ", streamed" : ""}`} onClick={() => void openBook(resumeBook)}>
         {artwork(resumeBook)}
         <span><small>CONTINUE READING</small><strong>{resumeBook.manifest.title}</strong><em>{resumeBook.manifest.author || "Unknown author"}</em></span>
@@ -558,6 +559,7 @@ export default function ReaderPage() {
       </div>
       <p className="storage-state">Remote cache {formatBytes(oracleCache.bytes)} · {oracleCache.audio_entries} audio sessions. Keeps previous 2, current, and next 3; {formatBytes(oracleCache.limit_bytes)} remains the safety ceiling. {storagePersistent ? "Local books use persistent device storage." : "iOS may still reclaim device data under critical pressure."}</p>
       {error && !oracleOpen && !huggingFaceOpen && <p className="reader-error library-error">{error}</p>}
+      </div>
       {book && <button className="library-mini-player" aria-label={`Open ${book.manifest.title}${isRemoteBook(book) ? ", streamed" : ""}`} onClick={() => setSurface("reader")}>{artwork(book)}<span><small>{playing ? "NOW PLAYING" : "READY TO RESUME"}</small><strong>{book.manifest.title}</strong></span><b>Open&nbsp;›</b></button>}
     </section> : manifest && chapter ? <>
       <section className={`reader-stage ${highlightMode ? "highlight-mode" : ""}`} onClick={handleReaderTap}>

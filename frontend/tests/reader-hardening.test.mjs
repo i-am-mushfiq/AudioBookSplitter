@@ -59,6 +59,20 @@ test("presents local and streamed books in one library with only a stream badge 
   assert.match(sourcesSource, /for \(const record of local\) books\.set\(record\.book_id, record\);/);
 });
 
+test("locks every app surface to the viewport and scrolls only dedicated content regions", async () => {
+  const readerSource = await readFile(resolve(root, "app", "reader", "page.tsx"), "utf8");
+  const readerCss = await readFile(resolve(root, "app", "reader", "reader-progress.css"), "utf8");
+  const mobileCss = await readFile(resolve(root, "mobile", "src", "mobile.css"), "utf8");
+  const capacitorConfig = await readFile(resolve(root, "capacitor.config.ts"), "utf8");
+  assert.match(readerSource, /className="library-scroll"/);
+  assert.match(readerCss, /\.library-home \{[^}]*overflow: hidden/);
+  assert.match(readerCss, /\.library-scroll \{[^}]*overflow-y: auto/);
+  assert.match(readerCss, /\.surface-reader \.reader-stage \{[^}]*overflow-y: auto/);
+  assert.match(mobileCss, /html \{[^}]*position: fixed[^}]*inset: 0/);
+  assert.match(mobileCss, /body \{[^}]*position: fixed[^}]*inset: 0/);
+  assert.match(capacitorConfig, /ios: \{[^}]*scrollEnabled: false[^}]*contentInset: "never"/);
+});
+
 test("accepts the canonical manifest and overlay", async () => {
   const manifest = await validation.validateManifest(JSON.parse(await readFile(resolve(fixtureRoot, "manifest.json"), "utf8")));
   const overlayPath = manifest.overlay_assets[0].path;
