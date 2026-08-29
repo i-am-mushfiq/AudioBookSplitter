@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { BookSyncOverlay, BookSyncOverlayEntry } from "../../lib/booksync/types";
 import { activeEntry, activeWordIndex, formatClock, loadedAudioAsset, logicalTimeForAudioAsset, nextAudioAsset, safeChapterMarkup, sessionTransitionSentenceIds } from "../../lib/reader/content";
-import { importBookSyncZip, listPositions, loadHighlights, loadLastOpenedBookId, loadPosition, saveHighlights, saveLastOpenedBookId, savePosition, type ImportProgress, type ReaderHighlight, type ReaderPosition } from "../../lib/reader/library";
-import { connectHuggingFaceLibrary, connectOracleLibrary, disconnectRemoteLibrary, getOracleCacheStats, listHuggingFaceProviders, listOracleProviders, type OracleCacheStats } from "../../lib/reader/oracle-library";
+import { importBookSyncZip, listListeningSegments, listPositions, loadHighlights, loadLastOpenedBookId, loadPosition, recordListeningSegment, saveHighlights, saveLastOpenedBookId, savePosition, type ImportProgress, type ListeningSegment, type ReaderHighlight, type ReaderPosition } from "../../lib/reader/library";
+import { connectHuggingFaceLibrary, connectOracleLibrary, disconnectRemoteLibrary, getOracleCacheStats, listHuggingFaceProviders, listOracleProviders, refreshHuggingFaceLibraries, type OracleCacheStats } from "../../lib/reader/oracle-library";
 import { isRemoteBook, listReaderBooks, playableAudio, prefetchAudioWindow, prepareAudioCacheWindow, readReaderFile, readReaderText, removeReaderBook, verifyReaderBook, type ReaderBookRecord } from "../../lib/reader/sources";
 import "./reader.css";
 import "./highlight.css";
@@ -47,7 +47,10 @@ export default function ReaderPage() {
   const [huggingFaceOpen, setHuggingFaceOpen] = useState(false);
   const [huggingFaceToken, setHuggingFaceToken] = useState("");
   const [connectingHuggingFace, setConnectingHuggingFace] = useState(false);
+  const [refreshingHuggingFace, setRefreshingHuggingFace] = useState(false);
   const [huggingFaceProviders, setHuggingFaceProviders] = useState<Awaited<ReturnType<typeof listHuggingFaceProviders>>>([]);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [todayListening, setTodayListening] = useState<ListeningSegment[]>([]);
   const [oracleCache, setOracleCache] = useState<OracleCacheStats>({ bytes: 0, entries: 0, audio_entries: 0, limit_bytes: Math.floor(1.5 * 1024 ** 3) });
   const [storagePersistent, setStoragePersistent] = useState<boolean>();
   const [error, setError] = useState("");
@@ -80,21 +83,34 @@ export default function ReaderPage() {
   } : undefined;
 
   const refreshLibrary = useCallback(async () => {
-    const [books, savedPositions, providers, huggingFace, cache] = await Promise.all([listReaderBooks(), listPositions(), listOracleProviders(), listHuggingFaceProviders(), getOracleCacheStats()]);
+    const [books, savedPositions, providers, huggingFace, cache, listening] = await Promise.all([listReaderBooks(), listPositions(), listOracleProviders(), listHuggingFaceProviders(), getOracleCacheStats(), listListeningSegments()]);
     setLibrary(books);
     setPositions(Object.fromEntries(savedPositions.map((position) => [position.book_id, position])));
     setOracleProviders(providers);
     setHuggingFaceProviders(huggingFace);
     setOracleCache(cache);
+    setTodayListening(listening);
     return books;
   }, []);
   useEffect(() => {
     let active = true;
-    void refreshLibrary().then(async (books) => {
+    const controller = new AbortController();
+    void (async () => {
+      // A failed background refresh must not hide the last known-good local catalog.
+      try { await refreshHuggingFaceLibraries(controller.signal); } catch { /* offline and expired-token fallback stays usable */ }
+      const books = await refreshLibrary();
       const lastBookId = await loadLastOpenedBookId();
       if (active && books.some((item) => item.book_id === lastBookId)) setLastOpenedBookId(lastBookId);
-    });
-    return () => { active = false; };
+    })();
+    return () => { active = false; controller.abort(); };
+  }, [refreshLibrary]);
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      void refreshHuggingFaceLibraries().then(() => refreshLibrary()).catch(() => undefined);
+    };
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => document.removeEventListener("visibilitychange", refreshWhenVisible);
   }, [refreshLibrary]);
   useEffect(() => {
     let cancelled = false;
@@ -320,6 +336,32 @@ export default function ReaderPage() {
     return () => { clearInterval(interval); window.removeEventListener("pagehide", persist); persist(); };
   }, [playing, manifest]);
 
+  useEffect(() => {
+    if (!playing || !manifest) return;
+    let startedAt = Date.now();
+    let startGlobalMs = latestPosition.current?.global_ms ?? 0;
+    const flush = () => {
+      const position = latestPosition.current;
+      if (!position || position.book_id !== manifest.book_id) return;
+      const elapsed = Math.min(30_000, Date.now() - startedAt);
+      const startChapter = manifest.chapters.find((item) => startGlobalMs >= item.audio_start_ms && startGlobalMs < item.audio_end_ms) ?? manifest.chapters[0];
+      const startAsset = manifest.audio_assets.find((item) => startGlobalMs >= item.global_start_ms && startGlobalMs < item.global_start_ms + item.duration_ms);
+      void recordListeningSegment({
+        book_id: manifest.book_id,
+        chapter_id: startChapter?.id || position.chapter_id,
+        audio_asset_id: startAsset?.id,
+        start_global_ms: startGlobalMs,
+        end_global_ms: position.global_ms,
+        listened_ms: elapsed,
+      }).then((saved) => { if (saved) setTodayListening((current) => [...current, saved]); }).catch(() => undefined);
+      startedAt = Date.now();
+      startGlobalMs = position.global_ms;
+    };
+    const interval = setInterval(flush, 15_000);
+    window.addEventListener("pagehide", flush);
+    return () => { clearInterval(interval); window.removeEventListener("pagehide", flush); flush(); };
+  }, [playing, manifest]);
+
   useEffect(() => () => { if (audioUrl.current) URL.revokeObjectURL(audioUrl.current); }, []);
 
   async function openBook(record: ReaderBookRecord) {
@@ -390,6 +432,31 @@ export default function ReaderPage() {
     finally { setConnectingHuggingFace(false); }
   }
 
+  async function syncHuggingFace() {
+    setRefreshingHuggingFace(true); setError("");
+    try { await refreshHuggingFaceLibraries(); await refreshLibrary(); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Could not refresh the Hugging Face library."); }
+    finally { setRefreshingHuggingFace(false); }
+  }
+
+  async function exportHighlights() {
+    if (!manifest || !savedHighlights.length) return;
+    const lines = [`# Highlights — ${manifest.title}`, manifest.author ? `\n${manifest.author}` : "", ""];
+    for (const item of savedHighlights) {
+      const owner = manifest.chapters.find((candidate) => candidate.id === item.chapter_id);
+      lines.push(`## ${owner?.title || owner?.label || "Chapter"}`, `- ${item.text}`, `- Position: ${formatClock(item.global_ms ?? 0)}`, `- Saved: ${new Date(item.created_at).toLocaleString()}`, "");
+    }
+    const safeName = manifest.title.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "BookSync";
+    const file = new File([lines.join("\n")], `${safeName}-highlights.md`, { type: "text/markdown" });
+    if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+      await navigator.share({ title: `${manifest.title} highlights`, files: [file] });
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    const anchor = document.createElement("a"); anchor.href = url; anchor.download = file.name; anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  }
+
   const importLabel = importProgress ? `${importProgress.phase.replace("-", " ")} ${importProgress.total ? Math.min(100, Math.round(importProgress.completed / importProgress.total * 100)) : 0}%` : "Importing…";
 
   function handleReaderTap(event: MouseEvent<HTMLElement>) {
@@ -444,6 +511,17 @@ export default function ReaderPage() {
   const sessionProgress = activeAsset ? Math.min(100, Math.max(0, Math.round((globalMs - activeAsset.global_start_ms) / activeAsset.duration_ms * 100))) : 0;
   const resumeBook = library.find((item) => item.book_id === lastOpenedBookId);
   const activeSessionIndex = manifest && activeAsset ? manifest.audio_assets.findIndex((item) => item.id === activeAsset.id) : -1;
+  const todayMinutes = Math.round(todayListening.reduce((sum, item) => sum + item.listened_ms, 0) / 60_000);
+  const todayParts = Array.from(todayListening.reduce((groups, item) => {
+    const record = library.find((candidate) => candidate.book_id === item.book_id);
+    const owner = record?.manifest.chapters.find((candidate) => candidate.id === item.chapter_id);
+    const sessionIndex = record?.manifest.audio_assets.findIndex((candidate) => candidate.id === item.audio_asset_id) ?? -1;
+    const key = `${item.book_id}:${item.chapter_id}:${item.audio_asset_id || ""}`;
+    const existing = groups.get(key);
+    if (existing) { existing.end = item.end_global_ms; existing.listened += item.listened_ms; }
+    else groups.set(key, { key, title: record?.manifest.title || "Unknown book", chapter: owner?.title || owner?.label || "Unknown chapter", session: sessionIndex + 1, start: item.start_global_ms, end: item.end_global_ms, listened: item.listened_ms });
+    return groups;
+  }, new Map<string, { key: string; title: string; chapter: string; session: number; start: number; end: number; listened: number }>()).values());
   const artwork = (record: ReaderBookRecord) => <div className="book-artwork" aria-hidden="true">{coverUrls[record.book_id] ? <img src={coverUrls[record.book_id]} alt="" /> : <span className="book-artwork-letter">{record.manifest.title.trim().slice(0, 1).toUpperCase() || "B"}</span>}{isRemoteBook(record) && <span className="book-stream-badge"><svg viewBox="0 0 24 24" focusable="false"><path d="M7.2 18.2h9.7a4.1 4.1 0 0 0 .5-8.2A6.2 6.2 0 0 0 5.6 8.7a4.8 4.8 0 0 0 1.6 9.5Z" /><path className="stream-play" d="m10.2 9.2 5 3.1-5 3.1Z" /></svg></span>}</div>;
   const formatBytes = (bytes: number) => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`;
 
@@ -458,6 +536,7 @@ export default function ReaderPage() {
         <div className="library-actions">
           <button className="reader-cloud" aria-label="Connect Oracle library" onClick={() => setOracleOpen(true)}><b aria-hidden="true">☁</b><span>Oracle</span></button>
           <button className="reader-cloud" aria-label="Connect Hugging Face library" onClick={() => setHuggingFaceOpen(true)}><b aria-hidden="true">HF</b><span>Hugging Face</span></button>
+          <button className="reader-cloud" aria-label="View today's listening activity" onClick={() => setActivityOpen(true)}><b aria-hidden="true">◷</b><span>{todayMinutes} min today</span></button>
           {importing ? <button className="reader-cancel" onClick={() => importController.current?.abort()}>{importLabel} · Cancel</button> : <button className="reader-import" aria-label="Import BookSync ZIP" onClick={() => fileInputRef.current?.click()}><b aria-hidden="true">＋</b><span>Import book</span></button>}
         </div>
       </header>
@@ -498,12 +577,13 @@ export default function ReaderPage() {
         <button className="speed-pill" onClick={() => setSpeedOpen(true)} aria-label={`Playback speed ${rate} times`}>{rate}×</button>
       </footer>
 
-      {contentsOpen && <div className="sheet-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setContentsOpen(false); }}><section className="reader-sheet contents-sheet" role="dialog" aria-modal="true" aria-labelledby="contents-title"><header><button onClick={() => setContentsOpen(false)} aria-label="Close contents">×</button><h2 id="contents-title">Book contents</h2><span /></header><div className="sheet-tabs three" role="tablist"><button role="tab" aria-selected={contentsTab === "chapters"} onClick={() => setContentsTab("chapters")}>Chapters</button><button role="tab" aria-selected={contentsTab === "sessions"} onClick={() => setContentsTab("sessions")}>Sessions</button><button role="tab" aria-selected={contentsTab === "highlights"} onClick={() => setContentsTab("highlights")}>Highlights</button></div><div className="contents-list">{contentsTab === "chapters" ? manifest.chapters.map((item, index) => <button className={index === chapterIndex ? "active" : ""} key={item.id} onClick={() => { setChapterIndex(index); void seekGlobal(item.audio_start_ms, playing); setContentsOpen(false); }}><b>{completedChapterIds.includes(item.id) ? "✓" : String(index + 1).padStart(2, "0")}</b><span><strong>{item.title || item.label}</strong><small>{formatClock(item.audio_start_ms)} · {formatClock(item.audio_end_ms - item.audio_start_ms)}</small></span><em>{index === chapterIndex ? "Now" : "›"}</em></button>) : contentsTab === "sessions" ? manifest.audio_assets.map((item, index) => { const owner = manifest.chapters.find((candidate) => item.global_start_ms >= candidate.audio_start_ms && item.global_start_ms < candidate.audio_end_ms); return <button className={item.id === activeAsset?.id ? "active" : ""} key={item.id} onClick={() => { void seekGlobal(item.global_start_ms, playing); setContentsOpen(false); }}><b>{String(index + 1).padStart(2, "0")}</b><span><strong>Session {index + 1}</strong><small>{owner?.title || owner?.label || "Book audio"} · {formatClock(item.duration_ms)}</small></span><em>{item.id === activeAsset?.id ? "Now" : "›"}</em></button>; }) : savedHighlights.length ? savedHighlights.map((item, index) => { const ownerIndex = manifest.chapters.findIndex((candidate) => candidate.id === item.chapter_id); const owner = manifest.chapters[ownerIndex]; return <button className={item.sentence_id === currentSentence?.sentence_id ? "active" : ""} key={item.sentence_id} onClick={() => { if (ownerIndex >= 0) setChapterIndex(ownerIndex); if (item.global_ms != null) void seekGlobal(item.global_ms, playing); setContentsOpen(false); }}><b>✦</b><span><strong>{item.text}</strong><small>{owner?.title || owner?.label || `Chapter ${ownerIndex + 1}`} · Highlight {index + 1}</small></span><em>›</em></button>; }) : <div className="highlights-empty"><b>No saved highlights yet.</b><span>Turn on ✦ Highlight, then tap any sentence you want to remember.</span></div>}</div></section></div>}
+      {contentsOpen && <div className="sheet-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setContentsOpen(false); }}><section className="reader-sheet contents-sheet" role="dialog" aria-modal="true" aria-labelledby="contents-title"><header><button onClick={() => setContentsOpen(false)} aria-label="Close contents">×</button><h2 id="contents-title">Book contents</h2>{contentsTab === "highlights" && savedHighlights.length ? <button className="sheet-export" onClick={() => void exportHighlights()}>Export</button> : <span />}</header><div className="sheet-tabs three" role="tablist"><button role="tab" aria-selected={contentsTab === "chapters"} onClick={() => setContentsTab("chapters")}>Chapters</button><button role="tab" aria-selected={contentsTab === "sessions"} onClick={() => setContentsTab("sessions")}>Sessions</button><button role="tab" aria-selected={contentsTab === "highlights"} onClick={() => setContentsTab("highlights")}>Highlights</button></div><div className="contents-list">{contentsTab === "chapters" ? manifest.chapters.map((item, index) => <button className={index === chapterIndex ? "active" : ""} key={item.id} onClick={() => { setChapterIndex(index); void seekGlobal(item.audio_start_ms, playing); setContentsOpen(false); }}><b>{completedChapterIds.includes(item.id) ? "✓" : String(index + 1).padStart(2, "0")}</b><span><strong>{item.title || item.label}</strong><small>{formatClock(item.audio_start_ms)} · {formatClock(item.audio_end_ms - item.audio_start_ms)}</small></span><em>{index === chapterIndex ? "Now" : "›"}</em></button>) : contentsTab === "sessions" ? manifest.audio_assets.map((item, index) => { const owner = manifest.chapters.find((candidate) => item.global_start_ms >= candidate.audio_start_ms && item.global_start_ms < candidate.audio_end_ms); return <button className={item.id === activeAsset?.id ? "active" : ""} key={item.id} onClick={() => { void seekGlobal(item.global_start_ms, playing); setContentsOpen(false); }}><b>{String(index + 1).padStart(2, "0")}</b><span><strong>Session {index + 1}</strong><small>{owner?.title || owner?.label || "Book audio"} · {formatClock(item.duration_ms)}</small></span><em>{item.id === activeAsset?.id ? "Now" : "›"}</em></button>; }) : savedHighlights.length ? savedHighlights.map((item, index) => { const ownerIndex = manifest.chapters.findIndex((candidate) => candidate.id === item.chapter_id); const owner = manifest.chapters[ownerIndex]; return <button className={item.sentence_id === currentSentence?.sentence_id ? "active" : ""} key={item.sentence_id} onClick={() => { if (ownerIndex >= 0) setChapterIndex(ownerIndex); if (item.global_ms != null) void seekGlobal(item.global_ms, playing); setContentsOpen(false); }}><b>✦</b><span><strong>{item.text}</strong><small>{owner?.title || owner?.label || `Chapter ${ownerIndex + 1}`} · Highlight {index + 1}</small></span><em>›</em></button>; }) : <div className="highlights-empty"><b>No saved highlights yet.</b><span>Turn on ✦ Highlight, then tap any sentence you want to remember.</span></div>}</div></section></div>}
 
       {speedOpen && <div className="sheet-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSpeedOpen(false); }}><section className="reader-sheet speed-sheet" role="dialog" aria-modal="true" aria-labelledby="speed-title"><header><button onClick={() => setSpeedOpen(false)} aria-label="Close speed controls">×</button><h2 id="speed-title">Playback speed</h2><span /></header><p>Choose a comfortable narration speed.</p><div className="speed-options">{[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5].map((value) => <button key={value} className={rate === value ? "active" : ""} onClick={() => { setRate(value); if (audioRef.current) audioRef.current.playbackRate = value; setSpeedOpen(false); }} aria-pressed={rate === value}>{value}×{rate === value && <span>✓</span>}</button>)}</div></section></div>}
     </> : null}
     {oracleOpen && <div className="sheet-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !connectingOracle) setOracleOpen(false); }}><section className="reader-sheet oracle-sheet" role="dialog" aria-modal="true" aria-labelledby="oracle-title"><header><button onClick={() => setOracleOpen(false)} aria-label="Close Oracle connection">×</button><h2 id="oracle-title">Oracle library</h2><span /></header><div className="oracle-connect"><p>Paste an HTTPS Oracle Object Storage bucket, prefix PAR, or full <code>library.json</code> URL. BookSync loads manifests first and keeps a small moving session window.</p><label><span>Library URL</span><input type="url" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="https://objectstorage…/o/library.json" value={oracleUrl} onChange={(event) => setOracleUrl(event.target.value)} /></label><button disabled={connectingOracle || !oracleUrl.trim()} onClick={() => void connectOracle()}>{connectingOracle ? "Checking library…" : "Connect Oracle"}</button>{error && <p className="reader-error">{error}</p>}<small>The URL is stored only on this device. A private pre-authenticated URL is a bearer secret—do not share it.</small></div>{oracleProviders.length > 0 && <div className="oracle-providers"><h3>Connected</h3>{oracleProviders.map((provider) => <div key={provider.id}><span><b>{provider.name}</b><small>{new URL(provider.catalog_url).hostname}</small></span><button onClick={() => void disconnectOracle(provider.id)}>Disconnect</button></div>)}</div>}<div className="oracle-cache-note"><b>{formatBytes(oracleCache.bytes)} cached</b><span>Audio window: previous 2, current, next 3. Outside sessions are released immediately; {formatBytes(oracleCache.limit_bytes)} is the emergency ceiling.</span></div></section></div>}
-    {huggingFaceOpen && <div className="sheet-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !connectingHuggingFace) setHuggingFaceOpen(false); }}><section className="reader-sheet oracle-sheet" role="dialog" aria-modal="true" aria-labelledby="huggingface-title"><header><button onClick={() => setHuggingFaceOpen(false)} aria-label="Close Hugging Face connection">×</button><h2 id="huggingface-title">Hugging Face library</h2><span /></header><div className="oracle-connect"><p>Connect to the private BookSync library at <code>{CANONICAL_HUGGING_FACE_REPO}</code>. BookSync keeps the previous 2, current, and next 3 audio sessions.</p><label><span>Read token</span><input type="password" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="off" placeholder="hf_…" value={huggingFaceToken} onChange={(event) => setHuggingFaceToken(event.target.value)} /></label><button disabled={connectingHuggingFace || !huggingFaceToken.trim()} onClick={() => void connectHuggingFace()}>{connectingHuggingFace ? "Checking private library…" : "Connect Hugging Face"}</button>{error && <p className="reader-error">{error}</p>}<small>Use a fine-grained read-only token for this dataset. It is entered at runtime and stored only in this app's local database; it is never built into the IPA or BookSync files.</small></div>{huggingFaceProviders.length > 0 && <div className="oracle-providers"><h3>Connected</h3>{huggingFaceProviders.map((provider) => <div key={provider.id}><span><b>{provider.name}</b><small>{provider.repo_id}@{provider.revision}</small></span><button onClick={() => void disconnectOracle(provider.id)}>Disconnect</button></div>)}</div>}<div className="oracle-cache-note"><b>{formatBytes(oracleCache.bytes)} cached</b><span>Outside-window audio is released immediately. Private sessions are authenticated and checksum-validated; {formatBytes(oracleCache.limit_bytes)} remains the emergency ceiling.</span></div></section></div>}
+    {huggingFaceOpen && <div className="sheet-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !connectingHuggingFace) setHuggingFaceOpen(false); }}><section className="reader-sheet oracle-sheet" role="dialog" aria-modal="true" aria-labelledby="huggingface-title"><header><button onClick={() => setHuggingFaceOpen(false)} aria-label="Close Hugging Face connection">×</button><h2 id="huggingface-title">Hugging Face library</h2><span /></header><div className="oracle-connect"><p>Connect to the private BookSync library at <code>{CANONICAL_HUGGING_FACE_REPO}</code>. Once connected, the saved token refreshes the catalog automatically at launch and whenever the app returns to the foreground.</p><label><span>Read token</span><input type="password" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="off" placeholder="hf_…" value={huggingFaceToken} onChange={(event) => setHuggingFaceToken(event.target.value)} /></label><button disabled={connectingHuggingFace || !huggingFaceToken.trim()} onClick={() => void connectHuggingFace()}>{connectingHuggingFace ? "Checking private library…" : "Connect Hugging Face"}</button>{error && <p className="reader-error">{error}</p>}<small>Use a fine-grained read-only token. It stays in this app's local database and is never built into the IPA or BookSync files.</small></div>{huggingFaceProviders.length > 0 && <div className="oracle-providers"><h3>Connected</h3>{huggingFaceProviders.map((provider) => <div key={provider.id}><span><b>{provider.name}</b><small>{provider.repo_id}@{provider.revision}</small></span><span className="provider-actions"><button disabled={refreshingHuggingFace} onClick={() => void syncHuggingFace()}>{refreshingHuggingFace ? "Syncing…" : "Refresh"}</button><button onClick={() => void disconnectOracle(provider.id)}>Disconnect</button></span></div>)}</div>}<div className="oracle-cache-note"><b>{formatBytes(oracleCache.bytes)} cached</b><span>Outside-window audio is released immediately. Private sessions are authenticated and checksum-validated; {formatBytes(oracleCache.limit_bytes)} remains the emergency ceiling.</span></div></section></div>}
+    {activityOpen && <div className="sheet-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setActivityOpen(false); }}><section className="reader-sheet activity-sheet" role="dialog" aria-modal="true" aria-labelledby="activity-title"><header><button onClick={() => setActivityOpen(false)} aria-label="Close listening activity">×</button><h2 id="activity-title">Today’s listening</h2><strong>{todayMinutes} min</strong></header><div className="activity-summary"><b>{todayParts.length ? `${todayParts.length} listened part${todayParts.length === 1 ? "" : "s"}` : "No listening recorded today"}</b><span>Stored privately on this device.</span></div><div className="activity-parts">{todayParts.map((item) => <article key={item.key}><span>♪</span><div><b>{item.title}</b><strong>{item.chapter}{item.session > 0 ? ` · Session ${item.session}` : ""}</strong><small>{formatClock(item.start)}–{formatClock(item.end)} · {Math.max(1, Math.round(item.listened / 60_000))} min listened</small></div></article>)}</div></section></div>}
     {error && manifest && <div className="reader-toast">{error}</div>}
   </main>;
 }

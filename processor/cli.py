@@ -180,6 +180,17 @@ def main(argv: list[str] | None = None) -> None:
     package_archive: Path | None = None
     if not args.dry_run and not args.skip_booksync:
         emit_event("packaging", 88, "Building and validating the reader package")
+
+        def packaging_progress(completed: int, total: int, message: str) -> None:
+            fraction = completed / total if total else 1
+            emit_event(
+                "packaging",
+                88 + (fraction * 8),
+                message,
+                completed_chapters=completed,
+                total_chapters=total,
+            )
+
         package_path = build_booksync_package(
             output_root=args.output,
             book_path=args.pdf,
@@ -195,6 +206,7 @@ def main(argv: list[str] | None = None) -> None:
             naming_template=args.naming_template,
             alignment_backend=alignment_backend,
             cover_path=args.cover,
+            progress_callback=packaging_progress,
         )
         package_archive = package_path.with_suffix(".booksync.zip")
     if not args.dry_run:

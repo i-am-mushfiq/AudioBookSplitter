@@ -533,6 +533,20 @@ Implemented MVP behavior:
 
 Later Oracle work includes signed-user authentication beyond bearer PAR URLs, automated upload/rotation from the desktop processor, background refresh, current-session chunk caching, offline pinning, cache controls, and network interruption recovery.
 
+## Planned: selective Hugging Face library fetching
+
+This is a planned feature only; it is not part of the current implementation.
+
+- Connecting a Hugging Face dataset will fetch only lightweight catalog metadata.
+- Books in the remote dataset will appear in a separate discovery/selection view, not automatically in the user's Library.
+- The user chooses each book to add. Only then will BookSync fetch and persist that book's manifest and make it visible in the main Library.
+- Removing a selected remote book will release its cached audio and metadata without disconnecting the dataset or affecting other selected books.
+- Catalog refreshes will preserve the user's selected set and show newly available remote titles as optional additions.
+
+Exit gate:
+
+- A dataset containing many books can be connected without filling the Library, and a user can explicitly add or remove individual remote books.
+
 ## Google Drive strategy
 
 Google Drive should be the next remote provider after the Oracle MVP because blob files support partial downloads using HTTP byte ranges.

@@ -5,6 +5,7 @@ directories:
   output: release-windows
 files:
   - desktop/main.mjs
+  - desktop/pipeline-watchdog.mjs
   - desktop/preload.cjs
   - desktop-app-dist/**
   - package.json

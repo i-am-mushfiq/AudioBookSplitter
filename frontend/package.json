@@ -21,6 +21,7 @@
     "ios:sync": "npm run mobile:sync && cap sync ios",
     "ios:ipa": "npm run ios:sync && xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Release -archivePath build/BookSync.xcarchive archive && xcodebuild -exportArchive -archivePath build/BookSync.xcarchive -exportOptionsPlist ios/ExportOptions.plist -exportPath build/ipa",
     "desktop:build": "vite build --config desktop/vite.config.ts --configLoader runner",
+    "desktop:test": "node --check desktop/main.mjs && node --check desktop/pipeline-watchdog.mjs && node --test tests/pipeline-watchdog.test.mjs",
     "desktop:dev": "npm run desktop:build && electron desktop/main.mjs",
     "desktop:package": "npm run desktop:build && electron-builder --config desktop/electron-builder.yml --win --x64",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",

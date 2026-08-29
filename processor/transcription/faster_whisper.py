@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import wave
 from dataclasses import asdict
 from pathlib import Path
@@ -51,7 +52,17 @@ def extract_audio_window(audio: Path, start: float, duration: float):
 def write_json_checkpoint(path: Path, data: dict) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(data), encoding="utf-8")
-    temporary.replace(path)
+    for attempt in range(10):
+        try:
+            temporary.replace(path)
+            return
+        except PermissionError:
+            if attempt == 9:
+                raise
+            # Windows antivirus and indexers can briefly hold the previous
+            # checkpoint open. Preserve resumability instead of failing a
+            # multi-hour transcription over a transient sharing violation.
+            time.sleep(0.25 * (attempt + 1))
 
 
 def load_transcript(path: Path) -> list[Word]:

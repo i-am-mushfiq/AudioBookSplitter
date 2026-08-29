@@ -42,7 +42,7 @@ def roman_to_int(value: str) -> int:
 
 def safe_name(value: str) -> str:
     value = re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_")
-    return value or "Book"
+    return value[:50].strip("_") or "Book"
 
 
 def derive_book_name(book_path: Path, sections: list[str], metadata_title: str | None = None) -> str:

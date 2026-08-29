@@ -1,5 +1,6 @@
 .venv/
 __pycache__/
+.pytest_cache/
 .vite-hardening-cache/
 output/
 .chapter-cut-jobs/
@@ -16,12 +17,12 @@ frontend/build/
 frontend/dist/
 frontend/desktop-app-dist/
 frontend/release-windows/
+frontend/release-windows*/
 frontend/public/*.zip
+*.log
 
-# Local test books and generated test exports
-test*-output*/
-test1-output/
-test1/
-test2-output/
-test2/
-To-be-done/
+# Private/local working data and generated artifacts
+local-data/
+artifacts/ui-snapshots/
+frontend/artifacts/
+_animal_hf_meta/

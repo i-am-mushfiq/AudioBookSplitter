@@ -12,3 +12,4 @@ dependencies:
       - huggingface-hub>=0.34.0
       - nvidia-cublas-cu12
       - nvidia-cudnn-cu12
+      - rich>=13.0.0

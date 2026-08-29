@@ -10,7 +10,7 @@ import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from processor import __version__
 from processor.alignment.backends import AlignmentBackend, SentenceAlignment
@@ -298,6 +298,7 @@ def build_booksync_package(
     naming_template: str,
     alignment_backend: AlignmentBackend,
     cover_path: Path | None = None,
+    progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> Path:
     source_hash = sha256_file(book_path)
     audiobook_hash = sha256_file(audio_path)
@@ -351,7 +352,10 @@ def build_booksync_package(
     overlay_assets: list[dict[str, Any]] = []
     all_entries: list[dict[str, Any]] = []
     chapter_entry_groups: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+    total_chapters = len(plan.chapter_ranges)
     for chapter_index, chapter_range in enumerate(plan.chapter_ranges, 1):
+        if progress_callback:
+            progress_callback(chapter_index - 1, total_chapters, f"Aligning package chapter {chapter_index} of {total_chapters}")
         chapter_id = f"ch_{chapter_index:04d}"
         overlay_id = f"ov_{chapter_index:04d}"
         canonical, _ = canonicalize_chapter(chapter_range.chapter, chapter_index)
@@ -408,6 +412,8 @@ def build_booksync_package(
                 "entry_count": len(entries),
             }
         )
+        if progress_callback:
+            progress_callback(chapter_index, total_chapters, f"Aligned package chapter {chapter_index} of {total_chapters}")
 
     exact_count = sum(entry["alignment"] == "exact" for entry in all_entries)
     approximate_count = sum(entry["alignment"] == "approximate" for entry in all_entries)

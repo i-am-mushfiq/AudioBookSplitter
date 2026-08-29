@@ -157,6 +157,19 @@ export async function connectHuggingFaceLibrary(repo: string, token: string, sig
   return saveDiscoveredLibrary(config, "huggingface", discovered);
 }
 
+/** Refresh connected Hugging Face catalogs with their device-local saved tokens. */
+export async function refreshHuggingFaceLibraries(signal?: AbortSignal) {
+  const configs = await listHuggingFaceProviders();
+  const refreshed: HuggingFaceBookRecord[] = [];
+  for (const config of configs) {
+    if (signal?.aborted) throw new DOMException("Library refresh was cancelled.", "AbortError");
+    const provider = new HuggingFaceStorageProvider(config);
+    const discovered = await provider.discover(signal);
+    refreshed.push(...await saveDiscoveredLibrary(config, "huggingface", discovered) as HuggingFaceBookRecord[]);
+  }
+  return refreshed;
+}
+
 async function saveDiscoveredLibrary(
   config: RemoteLibraryConfig,
   source: RemoteBookRecord["source"],

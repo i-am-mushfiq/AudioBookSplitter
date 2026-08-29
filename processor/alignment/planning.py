@@ -3,6 +3,8 @@ from __future__ import annotations
 import difflib
 import math
 import re
+from collections import Counter
+from collections import defaultdict
 
 from processor.models import ChapterRange, Cut, ExtractedBook, ProcessingPlan, Word
 from processor.text import norm
@@ -32,6 +34,46 @@ def find_phrase(words: list[Word], phrase: str, start_at: float = 0.0) -> float 
         score = difflib.SequenceMatcher(None, target, candidate, autojunk=False).ratio()
         if best is None or score > best[0]:
             best = (score, word.start)
+    return best[1] if best and best[0] >= 0.58 else None
+
+
+def build_phrase_index(words: list[Word]) -> tuple[list[str], list[float], dict[tuple[str, ...], list[int]]]:
+    tokens: list[str] = []
+    starts: list[float] = []
+    for word in words:
+        for token in norm(word.text):
+            tokens.append(token)
+            starts.append(word.start)
+    index: dict[tuple[str, ...], list[int]] = defaultdict(list)
+    for position in range(max(0, len(tokens) - 4)):
+        index[tuple(tokens[position : position + 5])].append(position)
+    return tokens, starts, dict(index)
+
+
+def find_indexed_phrase(
+    tokens: list[str],
+    starts: list[float],
+    index: dict[tuple[str, ...], list[int]],
+    phrase: str,
+    start_at: float = 0.0,
+) -> float | None:
+    """Find a phrase from exact five-token seeds, then score its full opening."""
+    target = norm(phrase)[:45]
+    if len(target) < 5:
+        return None
+    candidates: set[int] = set()
+    for offset in range(min(21, len(target) - 4)):
+        seed = tuple(target[offset : offset + 5])
+        for position in index.get(seed, []):
+            candidate_start = position - offset
+            if candidate_start >= 0 and starts[candidate_start] >= start_at:
+                candidates.add(candidate_start)
+    best: tuple[float, float] | None = None
+    for candidate_start in candidates:
+        candidate = tokens[candidate_start : candidate_start + len(target)]
+        score = difflib.SequenceMatcher(None, target, candidate, autojunk=False).ratio()
+        if best is None or score > best[0]:
+            best = (score, starts[candidate_start])
     return best[1] if best and best[0] >= 0.58 else None
 
 
@@ -80,15 +122,60 @@ def build_processing_plan(
             cursor = page_start
             page_times.append((page_number, page_start))
 
-    chapter_starts: list[tuple] = []
-    cursor = 0.0
-    for chapter in select_narrated_chapters(book):
-        found = find_phrase(words, chapter.title, cursor)
+    anchor_candidates: list[tuple] = []
+    transcript_tokens, transcript_starts, phrase_index = build_phrase_index(words)
+    selected_chapters = list(select_narrated_chapters(book))
+    title_counts = Counter(" ".join(norm(chapter.title)) for chapter in selected_chapters)
+    normalized_book_title = " ".join(norm(book.title or ""))
+    for chapter in selected_chapters:
+        # EPUB producers frequently stamp the book title onto every spine item.
+        # Searching that generic title first repeatedly anchors every chapter to
+        # the audiobook introduction and collapses the intervening content. A
+        # chapter's opening prose is much more distinctive, so prefer it and use
+        # the title only when the body cannot be located.
+        found = find_indexed_phrase(
+            transcript_tokens, transcript_starts, phrase_index,
+            chapter.text.replace("\n", " "), 0.0,
+        )
+        normalized_title = " ".join(norm(chapter.title))
+        title_is_distinctive = (
+            bool(normalized_title)
+            and normalized_title != normalized_book_title
+            and title_counts[normalized_title] == 1
+        )
+        if found is None and title_is_distinctive:
+            found = find_indexed_phrase(
+                transcript_tokens, transcript_starts, phrase_index, chapter.title, 0.0,
+            )
         if found is None:
-            found = find_phrase(words, chapter.text.replace("\n", " "), cursor)
-        if found is not None:
-            cursor = found
-        chapter_starts.append((chapter, cursor))
+            continue
+        anchor_candidates.append((chapter, found))
+
+    # Front matter is commonly stored before Chapter 1 in the EPUB but spoken
+    # as credits at the end of the recording. A greedy cursor follows that late
+    # match and makes every real chapter unreachable. Retain the longest strict
+    # sequence whose audio times increase with EPUB spine order instead.
+    chapter_starts: list[tuple] = []
+    if anchor_candidates:
+        lengths = [1] * len(anchor_candidates)
+        previous = [-1] * len(anchor_candidates)
+        for right in range(len(anchor_candidates)):
+            for left in range(right):
+                if anchor_candidates[left][1] < anchor_candidates[right][1] and lengths[left] + 1 > lengths[right]:
+                    lengths[right] = lengths[left] + 1
+                    previous[right] = left
+        cursor_index = max(range(len(anchor_candidates)), key=lambda index: lengths[index])
+        selected_indexes: list[int] = []
+        while cursor_index >= 0:
+            selected_indexes.append(cursor_index)
+            cursor_index = previous[cursor_index]
+        chapter_starts = [anchor_candidates[index] for index in reversed(selected_indexes)]
+
+    # A true single-chapter source has no boundary to discover; its only valid
+    # range is the full recording. Multi-chapter books must provide real anchors
+    # rather than silently manufacturing zero-confidence boundaries.
+    if not chapter_starts and len(selected_chapters) == 1:
+        chapter_starts.append((selected_chapters[0], 0.0))
 
     chapter_ranges: list[ChapterRange] = []
     for index, (chapter, chapter_time) in enumerate(chapter_starts):

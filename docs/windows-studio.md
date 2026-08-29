@@ -38,6 +38,27 @@ My_Book.booksync\        expanded, validated upload package
 
 The chapter-safe MP3 exports and processing reports remain beside them.
 
+## Run a folder pipeline
+
+Open **Pipeline** when several books are ready. Choose one source folder where
+each EPUB/PDF is beside its matching audiobook folder. Studio discovers the
+pairs, joins naturally ordered multi-part audio when needed, and resumes any
+existing checkpoints in the selected library folder.
+
+The lanes run in tandem:
+
+- one GPU transcription runs at a time;
+- as soon as its transcript checkpoint is complete, that book continues with
+  CPU alignment/rendering/packaging while the next book takes the GPU;
+- completed packages enter a separate single-file upload lane, so uploading can
+  continue while processing is still running.
+
+The Spotify-style live pipeline view shows the current GPU owner, downstream CPU
+books, active upload, every book's stage and percentage, and one unified live
+log. Enable automatic upload only when the chosen token or existing `hf auth`
+login has write access. Stopping and starting again is recovery-safe because the
+processor uses `--resume` and recognizes completed packages.
+
 ## Compare the local and cloud libraries
 
 Open **Library**. Studio scans the selected folder recursively and reads expanded `.booksync` packages and `.booksync.zip` files.

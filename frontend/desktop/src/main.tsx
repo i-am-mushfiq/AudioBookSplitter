@@ -59,6 +59,10 @@ type ProgressUpdate = {
   bookId?: string;
 };
 
+type BatchBookState = { bookId: string; title: string; stage: string; workload: string; percent: number; message: string; uploadStage?: string; uploadPercent?: number };
+type BatchUpdate = { type: "started" | "book" | "upload" | "scheduler" | "log" | "finished" | "warning"; books?: Array<{ bookId: string; title: string; audioFiles: number }>; bookId?: string; title?: string; stage?: string; workload?: string; percent?: number; message?: string; source?: string; gpuBook?: string | null; cpuBook?: string; queued?: number; success?: boolean; failures?: string[] };
+type PipelineSnapshot = { supervisor: string; paused: boolean; headline?: string; gpu_book?: string | null; cpu_books?: string[]; upload_book?: string | null; events?: Array<{ created_at: string; level: string; stage: string; message: string }>; books: Array<{ job_id: string; title: string; state: string; stage: string; workload: string; percent: number; message: string; uploaded: number }> };
+
 declare global {
   interface Window {
     booksyncDesktop: {
@@ -69,15 +73,21 @@ declare global {
       chooseAudio: () => Promise<string | null>;
       chooseCover: () => Promise<string | null>;
       chooseLibraryFolder: () => Promise<string | null>;
+      chooseBatchFolder: () => Promise<string | null>;
       coverDataUrl: (filePath: string) => Promise<string>;
       startJob: (payload: Record<string, unknown>) => Promise<{ started: boolean; output: string }>;
+      startBatch: (payload: Record<string, unknown>) => Promise<{ started: boolean; output: string }>;
+      pipelineStatus: () => Promise<PipelineSnapshot>;
+      pauseBatch: () => Promise<{ paused: boolean }>;
       cancelJob: () => Promise<{ cancelled: boolean }>;
+      cancelBatch: () => Promise<{ paused: boolean }>;
       refreshLibrary: (payload: Record<string, unknown>) => Promise<Inventory>;
       publishBook: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
       openPath: (filePath: string) => Promise<string>;
       showItem: (filePath: string) => Promise<boolean>;
       onJobUpdate: (callback: (update: ProgressUpdate) => void) => () => void;
       onPublishUpdate: (callback: (update: ProgressUpdate) => void) => () => void;
+      onBatchUpdate: (callback: (update: BatchUpdate) => void) => () => void;
     };
   }
 }
@@ -108,7 +118,7 @@ function App() {
 }
 
 function Studio() {
-  const [screen, setScreen] = useState<"create" | "library">("create");
+  const [screen, setScreen] = useState<"create" | "pipeline" | "library">("create");
   const [settings, setSettings] = useState<Settings | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [book, setBook] = useState("");
@@ -126,6 +136,14 @@ function Studio() {
   const [libraryError, setLibraryError] = useState("");
   const [publishState, setPublishState] = useState<Record<string, ProgressUpdate>>({});
   const [libraryCovers, setLibraryCovers] = useState<Record<string, string>>({});
+  const [batchFolder, setBatchFolder] = useState("D:\\Audiobooks\\__Ready");
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchPaused, setBatchPaused] = useState(false);
+  const [batchAutoUpload, setBatchAutoUpload] = useState(true);
+  const [batchBooks, setBatchBooks] = useState<Record<string, BatchBookState>>({});
+  const [batchLogs, setBatchLogs] = useState<string[]>([]);
+  const [batchStatus, setBatchStatus] = useState("Choose a source folder to scan and start.");
+  const [batchGpu, setBatchGpu] = useState("Idle");
 
   useEffect(() => {
     let active = true;
@@ -174,6 +192,50 @@ function Studio() {
     setPublishState((current) => ({ ...current, [update.bookId!]: update }));
     if (update.type === "finished") void refreshLibrary(false);
   }), [settings, token]);
+
+  useEffect(() => window.booksyncDesktop.onBatchUpdate((update) => {
+    if (update.type === "started") {
+      setBatchRunning(true); setBatchLogs([]); setBatchStatus(`Discovered ${update.books?.length || 0} book pairs.`);
+      setBatchBooks(Object.fromEntries((update.books || []).map((item) => [item.bookId, { ...item, stage: "queued", workload: "queued", percent: 0, message: `${item.audioFiles} audio file${item.audioFiles === 1 ? "" : "s"}` }])));
+    } else if (update.type === "book" && update.bookId) {
+      setBatchBooks((current) => ({ ...current, [update.bookId!]: { ...(current[update.bookId!] || { bookId: update.bookId!, title: update.title || update.bookId! }), stage: update.stage || "processing", workload: update.workload || "cpu", percent: update.percent || 0, message: update.message || "Working" } }));
+    } else if (update.type === "upload" && update.bookId) {
+      setBatchBooks((current) => ({ ...current, [update.bookId!]: { ...(current[update.bookId!] || { bookId: update.bookId!, title: update.title || update.bookId!, stage: "complete", workload: "done", percent: 100, message: "Package ready" }), uploadStage: update.stage || "uploading", uploadPercent: update.percent || 0 } }));
+    } else if (update.type === "scheduler") {
+      setBatchGpu(update.gpuBook || "Transitioning to next book"); setBatchStatus(update.message || "Pipeline running");
+    } else if (update.type === "log" || update.type === "warning") {
+      setBatchLogs((current) => [...current, `[${update.source || update.type}] ${update.message || ""}`].slice(-250));
+    } else if (update.type === "finished") {
+      setBatchRunning(false); setBatchGpu("Idle"); setBatchStatus(update.message || (update.success ? "Pipeline complete" : "Pipeline stopped"));
+      if (update.failures?.length) setBatchLogs((current) => [...current, ...update.failures!.map((item) => `[error] ${item}`)].slice(-250));
+      void refreshLibrary(true);
+    }
+  }), [settings, token]);
+
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      try {
+        const snapshot = await window.booksyncDesktop.pipelineStatus();
+        if (!active) return;
+        const runningNow = ["running", "recovering", "starting"].includes(snapshot.supervisor);
+        setBatchRunning(runningNow);
+        setBatchPaused(snapshot.paused || snapshot.supervisor === "paused");
+        setBatchGpu(snapshot.gpu_book || "Idle");
+        setBatchStatus(snapshot.headline || `Pipeline ${snapshot.supervisor}`);
+        if (snapshot.events?.length) setBatchLogs(snapshot.events.map((item) => `[${item.created_at}] [${item.stage}] ${item.message}`).slice(-250));
+        if (snapshot.books.length) setBatchBooks(Object.fromEntries(snapshot.books.map((item) => [item.job_id, {
+          bookId: item.job_id, title: item.title, stage: item.stage, workload: item.workload,
+          percent: item.percent, message: item.message,
+          uploadStage: item.uploaded ? "complete" : item.workload === "upload" ? item.stage : item.state === "staged" ? "queued" : undefined,
+          uploadPercent: item.workload === "upload" ? Math.max(0, Math.min(100, (item.percent - 94) * 20)) : undefined,
+        }])));
+      } catch { /* transient status reads are retried */ }
+    };
+    void refresh();
+    const timer = window.setInterval(refresh, 2000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -236,6 +298,27 @@ function Studio() {
     }
   }
 
+  async function pickBatchFolder() {
+    const selected = await window.booksyncDesktop.chooseBatchFolder();
+    if (selected) setBatchFolder(selected);
+  }
+
+  async function runBatch() {
+    if (!settings || !batchFolder) return;
+    try {
+      setBatchStatus("Starting folder discovery…");
+      await window.booksyncDesktop.startBatch({ ...settings, sourceFolder: batchFolder, autoUpload: batchAutoUpload, token });
+    } catch (error) {
+      setBatchRunning(false); setBatchStatus(error instanceof Error ? error.message : "Could not start the pipeline.");
+    }
+  }
+
+  async function pausePipeline() {
+    await window.booksyncDesktop.pauseBatch();
+    setBatchStatus("Pausing safely after checkpoint…");
+    setBatchPaused(true);
+  }
+
   async function refreshLibrary(localOnly = false, suppliedSettings = settings) {
     if (!suppliedSettings) return;
     setLibraryBusy(true);
@@ -268,6 +351,7 @@ function Studio() {
       <div className="brand"><span className="brand-mark">B</span><span><b>BookSync</b><small>STUDIO</small></span></div>
       <nav aria-label="Main navigation">
         <button className={screen === "create" ? "active" : ""} onClick={() => setScreen("create")}><span>＋</span><b>Create</b></button>
+        <button className={screen === "pipeline" ? "active" : ""} onClick={() => setScreen("pipeline")}><span>≋</span><b>Pipeline</b><em>{Object.keys(batchBooks).length || ""}</em></button>
         <button className={screen === "library" ? "active" : ""} onClick={() => setScreen("library")}><span>▦</span><b>Library</b><em>{counts.local + counts.remote}</em></button>
       </nav>
       <div className={`engine-card ${health?.ready ? "ready" : "blocked"}`}>
@@ -279,7 +363,7 @@ function Studio() {
 
     <section className="workspace">
       <header className="topbar">
-        <div><p className="eyebrow">BOOKSYNC STUDIO</p><h1>{screen === "create" ? "Build a synchronized book" : "Your complete library"}</h1></div>
+        <div><p className="eyebrow">BOOKSYNC STUDIO</p><h1>{screen === "create" ? "Build a synchronized book" : screen === "pipeline" ? "Run your audiobook pipeline" : "Your complete library"}</h1></div>
         <button className="folder-button" onClick={pickLibraryFolder}><span>⌂</span><span><small>LIBRARY FOLDER</small><b>{fileName(settings.libraryFolder)}</b></span><em>Change</em></button>
       </header>
 
@@ -331,6 +415,27 @@ function Studio() {
             </div> : <div className="progress-actions"><button className="primary" disabled={!canBuild} onClick={build}>{running ? "Processing…" : "Build BookSync package"}</button>{running && <button className="cancel" onClick={() => window.booksyncDesktop.cancelJob()}>Cancel</button>}</div>}
             {logs.length > 0 && <details className="activity"><summary>Technical activity</summary><pre>{logs.join("\n")}</pre></details>}
           </section>
+        </section>
+      </> : screen === "pipeline" ? <>
+        <section className="pipeline-hero">
+          <div><p className="eyebrow">TANDEM PROCESSING</p><h2>One GPU lane. CPU work and uploads keep moving.</h2><p>Choose a folder where each EPUB/PDF sits beside its matching audiobook folder. Studio discovers the pairs, joins multi-part audio, resumes checkpoints, and starts the next transcription as soon as the GPU is released.</p></div>
+          <span className={batchRunning ? "spinning-disc" : ""}>▶</span>
+        </section>
+        <section className="pipeline-controls">
+          <button className={`pipeline-folder ${batchFolder ? "selected" : ""}`} onClick={pickBatchFolder}><span>⌂</span><div><small>SOURCE FOLDER</small><b>{batchFolder ? fileName(batchFolder) : "Choose audiobook collection"}</b><em>{batchFolder || "EPUB/PDF files beside matching audiobook folders"}</em></div><strong>Browse</strong></button>
+          <label className="pipeline-token"><span>HF write token <em>used only by the upload lane</em></span><input type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder={health?.huggingface_authenticated ? "Using existing hf login" : "hf_…"} /></label>
+          <label className="upload-toggle"><input type="checkbox" checked={batchAutoUpload} onChange={(event) => setBatchAutoUpload(event.target.checked)} /><span><b>Upload finished books automatically</b><small>One verified upload at a time, while processing continues.</small></span></label>
+          <div className="pipeline-run"><button className="primary" disabled={!batchFolder || batchRunning || !health?.ready} onClick={runBatch}>{batchPaused ? "Resume from checkpoints" : batchRunning ? "Pipeline running…" : "Start tandem pipeline"}</button>{batchRunning && <button className="cancel" onClick={pausePipeline}>Pause safely</button>}</div>
+        </section>
+        <section className="workload-strip">
+          <article><span className={batchRunning ? "live-dot" : ""}>GPU</span><div><small>TRANSCRIPTION LANE</small><b>{batchGpu}</b></div></article>
+          <article><span>CPU</span><div><small>DOWNSTREAM WORK</small><b>{Object.values(batchBooks).filter((item) => item.workload === "cpu" && item.stage !== "complete").map((item) => item.title).join(", ") || "Idle"}</b></div></article>
+          <article><span>↑</span><div><small>UPLOAD LANE</small><b>{Object.values(batchBooks).find((item) => item.uploadStage === "uploading")?.title || (batchAutoUpload ? "Watching packages" : "Off")}</b></div></article>
+        </section>
+        <section className="pipeline-live">
+          <header><div><p className="eyebrow">LIVE PIPELINE</p><h3>{batchStatus}</h3></div><span>{Object.values(batchBooks).filter((item) => item.stage === "complete").length}/{Object.keys(batchBooks).length} packaged</span></header>
+          <div className="pipeline-book-list">{Object.values(batchBooks).length ? Object.values(batchBooks).map((item) => <article key={item.bookId}><span className={`lane ${item.workload}`}>{item.stage === "complete" ? "✓" : item.workload === "gpu" ? "GPU" : item.workload === "cpu" ? "CPU" : "…"}</span><div><b>{item.title}</b><small>{item.message}</small><i><span style={{ width: `${Math.max(0, Math.min(100, item.percent))}%` }} /></i></div><em>{Math.round(item.percent)}%</em><strong className={`upload-state ${item.uploadStage || "waiting"}`}>{item.uploadStage === "complete" ? "Uploaded" : item.uploadStage === "uploading" ? `Upload ${Math.round(item.uploadPercent || 0)}%` : batchAutoUpload ? "Upload queued" : "Local only"}</strong></article>) : <div className="pipeline-empty">Books appear here as soon as folder discovery begins.</div>}</div>
+          <div className="live-console"><header><b>Live log</b><span>{batchRunning ? "● streaming" : "○ stopped"}</span></header><pre>{batchLogs.length ? batchLogs.join("\n") : "Waiting for pipeline activity…"}</pre></div>
         </section>
       </> : <>
         <section className="library-controls">

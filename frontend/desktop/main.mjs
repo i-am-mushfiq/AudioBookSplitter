@@ -1,12 +1,14 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } from "electron";
 import { spawn } from "node:child_process";
-import { existsSync, promises as fs } from "node:fs";
+import { existsSync, mkdirSync, promises as fs, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { nextWatchdogDelay, shouldRestartPipeline } from "./pipeline-watchdog.mjs";
 
 const desktopDirectory = path.dirname(fileURLToPath(import.meta.url));
 const EVENT_PREFIX = "BOOKSYNC_EVENT ";
 const RESULT_PREFIX = "BOOKSYNC_RESULT ";
+const BATCH_EVENT_PREFIX = "BOOKSYNC_BATCH_EVENT ";
 const DEFAULT_REPO = "mdrahman/booksync-library";
 const BOOK_EXTENSIONS = new Set([".pdf", ".epub"]);
 const AUDIO_EXTENSIONS = new Set([".mp3", ".m4a", ".m4b", ".aac", ".wav", ".flac", ".ogg", ".opus", ".wma", ".mp4"]);
@@ -15,6 +17,10 @@ const COVER_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 let mainWindow;
 let runningJob;
 let runningPublish;
+let runningBatch;
+let batchRestartTimer;
+let batchGeneration = 0;
+let appQuitting = false;
 
 function coreDirectory() {
   return app.isPackaged ? path.join(process.resourcesPath, "booksync-core") : path.resolve(desktopDirectory, "..", "..");
@@ -28,6 +34,19 @@ function rendererFile() {
 
 function defaultLibraryFolder() {
   return path.join(app.getPath("downloads"), "BookSync");
+}
+
+function pipelinePaths() {
+  const requestedWorkspace = path.resolve(process.env.BOOKSYNC_WORKSPACE || "C:\\Personal_Endeavours\\BookSync2");
+  const workspace = existsSync(requestedWorkspace) ? requestedWorkspace : path.join(app.getPath("userData"), "pipeline-workspace");
+  return {
+    source: "D:\\Audiobooks\\__Ready",
+    processed: "D:\\Audiobooks\\__Processed",
+    inHuggingFace: "D:\\Audiobooks\\__in_hugging_face",
+    output: path.join(workspace, "local-data", "books", "raw_processing"),
+    uploadReady: path.join(workspace, "local-data", "books", "upload_ready"),
+    state: path.join(workspace, "local-data", "books", ".pipeline-state"),
+  };
 }
 
 function settingsFile() {
@@ -148,6 +167,14 @@ async function selectLibraryFolder() {
   return result.canceled ? null : result.filePaths[0];
 }
 
+async function selectBatchFolder() {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Choose the folder containing EPUB/PDF files and neighbouring audiobook folders",
+    properties: ["openDirectory"],
+  });
+  return result.canceled ? null : result.filePaths[0];
+}
+
 async function coverDataUrl(filePath) {
   const resolved = ensureFile(filePath, COVER_EXTENSIONS, "a cover image");
   const stat = await fs.stat(resolved);
@@ -163,7 +190,7 @@ function terminateTree(child) {
 }
 
 async function startJob(payload) {
-  if (runningJob) throw new Error("A book is already being processed.");
+  if (runningJob || runningBatch || batchRestartTimer) throw new Error("A BookSync processing pipeline is already running.");
   const book = ensureFile(payload?.book, BOOK_EXTENSIONS, "a PDF or EPUB");
   const audio = ensureFile(payload?.audio, AUDIO_EXTENSIONS, "an audiobook");
   const cover = ensureFile(payload?.cover, COVER_EXTENSIONS, "a JPG, PNG, or WebP cover", true);
@@ -230,6 +257,143 @@ async function startJob(payload) {
     }
   });
   return { started: true, output };
+}
+
+async function startBatch(payload) {
+  if (runningJob || runningBatch || batchRestartTimer) throw new Error("A BookSync processing pipeline is already running.");
+  if (typeof payload?.sourceFolder !== "string" || !payload.sourceFolder.trim()) throw new Error("Choose the batch source folder.");
+  const sourceFolder = path.resolve(payload.sourceFolder);
+  if (!existsSync(sourceFolder)) throw new Error("The batch source folder can no longer be found.");
+  const settings = safeSettings(payload);
+  await fs.mkdir(settings.libraryFolder, { recursive: true });
+  await saveSettings(settings);
+  const paths = pipelinePaths();
+  await fs.rm(path.join(paths.state, "PAUSE"), { force: true });
+  await fs.rm(path.join(paths.uploadReady, ".upload-state", "STOP"), { force: true });
+  const args = [
+    path.join(coreDirectory(), "tools", "booksync_pipeline_supervisor.py"), "resume",
+    "--source", sourceFolder,
+    "--processed", paths.processed,
+    "--in-hugging-face", paths.inHuggingFace,
+    "--output", paths.output,
+    "--upload-ready", paths.uploadReady,
+    "--destination", settings.libraryFolder,
+    "--state-dir", paths.state,
+    "--model", settings.model,
+    "--device", settings.device,
+    "--minutes", settings.minutes,
+    "--mode", settings.mode,
+    "--repo", settings.repoId,
+  ];
+  args.push(payload?.autoUpload === false ? "--no-auto-upload" : "--auto-upload");
+  const env = { ...process.env, ...(typeof payload?.token === "string" && payload.token.trim() ? { HF_TOKEN: payload.token.trim() } : {}) };
+  const generation = ++batchGeneration;
+  launchBatchAttempt({ args, env, generation, attempt: 0 });
+  return { started: true, sourceFolder, output: paths.output };
+}
+
+async function appendWatchdogAudit(event, details = {}) {
+  try {
+    const state = pipelinePaths().state;
+    await fs.mkdir(state, { recursive: true });
+    await fs.appendFile(path.join(state, "desktop-watchdog.jsonl"),
+      `${JSON.stringify({ created_at: new Date().toISOString(), event, ...details })}\n`, "utf8");
+  } catch (error) {
+    console.error("Could not persist pipeline watchdog event:", error);
+  }
+}
+
+async function readPipelineTerminalState() {
+  try {
+    const value = JSON.parse(await fs.readFile(path.join(pipelinePaths().state, "pipeline-status.json"), "utf8"));
+    return typeof value.supervisor === "string" ? value.supervisor : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function launchBatchAttempt(context) {
+  const pauseMarker = path.join(pipelinePaths().state, "PAUSE");
+  if (context.generation !== batchGeneration || appQuitting) return;
+  const startedAt = Date.now();
+  const child = spawn(resolvePython(), context.args, { cwd: coreDirectory(), windowsHide: true, env: context.env });
+  runningBatch = child;
+  let details = "";
+  const onLine = (line) => {
+    if (line.startsWith(BATCH_EVENT_PREFIX)) {
+      try { publish("booksync:batch-update", JSON.parse(line.slice(BATCH_EVENT_PREFIX.length))); return; }
+      catch { /* retain malformed event in the visible log */ }
+    }
+    if (line.trim()) {
+      details = `${details}${line}\n`.slice(-40000);
+      publish("booksync:batch-update", { type: "log", source: "Pipeline", message: line });
+    }
+  };
+  const stdout = parseLines(onLine);
+  const stderr = parseLines(onLine);
+  child.stdout.on("data", (chunk) => stdout.push(chunk));
+  child.stderr.on("data", (chunk) => stderr.push(chunk));
+  child.on("error", (error) => { details = `${details}${error.stack || error.message}\n`.slice(-40000); });
+  child.on("close", async (code) => {
+    stdout.finish(); stderr.finish(); runningBatch = undefined;
+    const paused = existsSync(pauseMarker);
+    const terminalState = await readPipelineTerminalState();
+    const stableRun = Date.now() - startedAt >= 5 * 60 * 1000;
+    const attempt = stableRun ? 0 : context.attempt;
+    if (context.generation !== batchGeneration) {
+      await appendWatchdogAudit("controller_superseded", { exit_code: code, terminal_state: terminalState });
+      return;
+    }
+    if (shouldRestartPipeline({ exitCode: code, paused, quitting: appQuitting, terminalState, attempt })) {
+      const delay = nextWatchdogDelay(attempt);
+      const nextAttempt = attempt + 1;
+      await appendWatchdogAudit("restart_scheduled", { exit_code: code, terminal_state: terminalState,
+        attempt: nextAttempt, delay_ms: delay, details: details.slice(-8000) });
+      publish("booksync:batch-update", { type: "warning", source: "Watchdog",
+        message: `Controller stopped unexpectedly; recovering from checkpoints in ${Math.round(delay / 1000)}s (${nextAttempt}/5).` });
+      batchRestartTimer = setTimeout(() => {
+        batchRestartTimer = undefined;
+        launchBatchAttempt({ ...context, attempt: nextAttempt });
+      }, delay);
+      return;
+    }
+    await appendWatchdogAudit("controller_closed", { exit_code: code, terminal_state: terminalState,
+      paused, quitting: appQuitting, details: details.slice(-8000) });
+    if (code !== 0 && code !== 2 && !["complete", "attention", "waiting_upload"].includes(terminalState)) {
+      publish("booksync:batch-update", { type: "finished", success: false,
+        failures: [details.trim() || `Pipeline stopped with code ${code}.`],
+        message: context.attempt >= 5 ? "Pipeline watchdog exhausted; manual attention required" : "Pipeline stopped" });
+    }
+  });
+}
+
+async function pipelineStatus() {
+  const statusFile = path.join(pipelinePaths().state, "pipeline-status.json");
+  try {
+    const value = JSON.parse(await fs.readFile(statusFile, "utf8"));
+    const age = Date.now() - Date.parse(value.updated_at || 0);
+    if (["running", "recovering", "starting"].includes(value.supervisor) && (!Number.isFinite(age) || age > 15000)) {
+      return { ...value, supervisor: "interrupted", paused: true, headline: "Previous run was interrupted; resume from checkpoints" };
+    }
+    return value;
+  }
+  catch { return { supervisor: "stopped", paused: false, books: [], counts: {}, gpu_book: null, cpu_books: [], upload_book: null }; }
+}
+
+async function pauseBatch() {
+  if (batchRestartTimer) {
+    clearTimeout(batchRestartTimer);
+    batchRestartTimer = undefined;
+  }
+  batchGeneration += 1;
+  const paths = pipelinePaths();
+  await fs.mkdir(paths.state, { recursive: true });
+  await fs.writeFile(path.join(paths.state, "PAUSE"), new Date().toISOString(), "utf8");
+  const uploadState = path.join(paths.uploadReady, ".upload-state");
+  await fs.mkdir(uploadState, { recursive: true });
+  await fs.writeFile(path.join(uploadState, "STOP"), new Date().toISOString(), "utf8");
+  await appendWatchdogAudit("pause_requested");
+  return { paused: true };
 }
 
 async function refreshLibrary(payload) {
@@ -336,8 +500,24 @@ app.whenReady().then(async () => {
 });
 
 app.on("before-quit", () => {
+  appQuitting = true;
+  batchGeneration += 1;
+  if (batchRestartTimer) clearTimeout(batchRestartTimer);
+  if (runningBatch) {
+    try {
+      const paths = pipelinePaths();
+      mkdirSync(paths.state, { recursive: true });
+      writeFileSync(path.join(paths.state, "PAUSE"), new Date().toISOString(), "utf8");
+      const uploadState = path.join(paths.uploadReady, ".upload-state");
+      mkdirSync(uploadState, { recursive: true });
+      writeFileSync(path.join(uploadState, "STOP"), new Date().toISOString(), "utf8");
+    } catch (error) {
+      console.error("Could not persist pipeline pause during application shutdown:", error);
+    }
+  }
   terminateTree(runningJob);
   terminateTree(runningPublish);
+  terminateTree(runningBatch);
 });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 
@@ -348,9 +528,14 @@ ipcMain.handle("booksync:choose-book", () => selectFile("Books", ["pdf", "epub"]
 ipcMain.handle("booksync:choose-audio", () => selectFile("Audiobooks", [...AUDIO_EXTENSIONS].map((item) => item.slice(1))));
 ipcMain.handle("booksync:choose-cover", () => selectFile("Book covers", ["jpg", "jpeg", "png", "webp"]));
 ipcMain.handle("booksync:choose-library-folder", () => selectLibraryFolder());
+ipcMain.handle("booksync:choose-batch-folder", () => selectBatchFolder());
 ipcMain.handle("booksync:cover-data-url", (_event, filePath) => coverDataUrl(filePath));
 ipcMain.handle("booksync:start-job", (_event, payload) => startJob(payload));
+ipcMain.handle("booksync:start-batch", (_event, payload) => startBatch(payload));
+ipcMain.handle("booksync:pipeline-status", () => pipelineStatus());
+ipcMain.handle("booksync:pause-batch", () => pauseBatch());
 ipcMain.handle("booksync:cancel-job", () => { terminateTree(runningJob); return { cancelled: Boolean(runningJob) }; });
+ipcMain.handle("booksync:cancel-batch", () => pauseBatch());
 ipcMain.handle("booksync:refresh-library", (_event, payload) => refreshLibrary(payload));
 ipcMain.handle("booksync:publish-book", (_event, payload) => publishBook(payload));
 ipcMain.handle("booksync:open-path", async (_event, filePath) => shell.openPath(path.resolve(filePath)));

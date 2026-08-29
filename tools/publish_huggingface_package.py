@@ -79,7 +79,8 @@ def publish(package: Path, repo_id: str, revision: str = "main") -> dict[str, An
         [
             "hf", "upload", repo_id, str(package), package.name,
             "--repo-type", "dataset", "--revision", revision,
-            "--exclude", "*.zip", ".cache/**",
+            "--exclude", "*.zip",
+            "--exclude", ".cache/**",
             "--commit-message", f"Publish {package.stem} BookSync package",
         ],
         check=True,

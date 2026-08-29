@@ -3,13 +3,14 @@ import type { BookId, BookSyncManifest, RelativePackagePath } from "../booksync/
 import { IMPORT_LIMITS, PackageValidationError, declaredFiles, expectedExpandedBytes, normalizePackagePath, validateArchiveEntry, validateDeclaredBlob, validateManifest, validateOverlay } from "./validation";
 
 const DB_NAME = "booksync-local-library";
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 const BOOKS = "books";
 const FILES = "files";
 const POSITIONS = "positions";
 const IMPORTS = "imports";
 const SETTINGS = "settings";
 const HIGHLIGHTS = "highlights";
+const LISTENING = "listening";
 
 export type ImportPhase = "reading-manifest" | "checking-storage" | "extracting" | "validating" | "committing";
 export interface ImportProgress { phase: ImportPhase; completed: number; total: number; path?: string }
@@ -46,6 +47,18 @@ export interface ReaderHighlight {
   created_at: string;
 }
 
+export interface ListeningSegment {
+  id: string;
+  local_date: string;
+  book_id: BookId;
+  chapter_id: string;
+  audio_asset_id?: string;
+  start_global_ms: number;
+  end_global_ms: number;
+  listened_ms: number;
+  recorded_at: string;
+}
+
 function request<T>(value: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     value.onsuccess = () => resolve(value.result);
@@ -75,6 +88,11 @@ function openDatabase(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(POSITIONS)) db.createObjectStore(POSITIONS, { keyPath: "book_id" });
       if (!db.objectStoreNames.contains(SETTINGS)) db.createObjectStore(SETTINGS, { keyPath: "key" });
       if (!db.objectStoreNames.contains(HIGHLIGHTS)) db.createObjectStore(HIGHLIGHTS, { keyPath: "book_id" });
+      if (!db.objectStoreNames.contains(LISTENING)) {
+        const listening = db.createObjectStore(LISTENING, { keyPath: "id" });
+        listening.createIndex("local_date", "local_date", { unique: false });
+        listening.createIndex("book_id", "book_id", { unique: false });
+      }
     };
     pending.onsuccess = () => resolve(pending.result);
     pending.onerror = () => reject(pending.error);
@@ -142,6 +160,38 @@ export async function loadHighlights(bookId: BookId): Promise<ReaderHighlight[]>
 
 export async function saveHighlights(bookId: BookId, highlights: ReaderHighlight[]): Promise<void> {
   await transaction(HIGHLIGHTS, "readwrite", (store) => store.put({ book_id: bookId, highlights, updated_at: new Date().toISOString() }));
+}
+
+export function localDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export async function recordListeningSegment(segment: Omit<ListeningSegment, "id" | "local_date" | "recorded_at">): Promise<ListeningSegment | undefined> {
+  const listenedMs = Math.max(0, Math.round(segment.listened_ms));
+  if (listenedMs < 1_000) return undefined;
+  const recordedAt = new Date();
+  const value: ListeningSegment = {
+    ...segment,
+    id: crypto.randomUUID(),
+    local_date: localDateKey(recordedAt),
+    listened_ms: listenedMs,
+    recorded_at: recordedAt.toISOString(),
+  };
+  await transaction(LISTENING, "readwrite", (store) => store.put(value));
+  return value;
+}
+
+export async function listListeningSegments(localDate = localDateKey()): Promise<ListeningSegment[]> {
+  const db = await openDatabase();
+  try {
+    const tx = db.transaction(LISTENING, "readonly");
+    const values = await request(tx.objectStore(LISTENING).index("local_date").getAll(IDBKeyRange.only(localDate))) as ListeningSegment[];
+    await transactionDone(tx);
+    return values.sort((a, b) => a.recorded_at.localeCompare(b.recorded_at));
+  } finally { db.close(); }
 }
 
 export async function loadLastOpenedBookId(): Promise<BookId | undefined> {

@@ -38,6 +38,18 @@ test("uses the canonical private Hugging Face dataset without an editable reposi
   assert.doesNotMatch(readerSource, /setHuggingFaceRepo|<span>Dataset<\/span>/);
 });
 
+test("refreshes a saved Hugging Face connection and keeps listening/highlight data device-local", async () => {
+  const readerSource = await readFile(resolve(root, "app", "reader", "page.tsx"), "utf8");
+  const remoteLibrarySource = await readFile(resolve(root, "lib", "reader", "oracle-library.ts"), "utf8");
+  const localLibrarySource = await readFile(resolve(root, "lib", "reader", "library.ts"), "utf8");
+  assert.match(remoteLibrarySource, /export async function refreshHuggingFaceLibraries/);
+  assert.match(readerSource, /visibilitychange/);
+  assert.match(readerSource, /refreshHuggingFaceLibraries\(controller\.signal\)/);
+  assert.match(localLibrarySource, /const LISTENING = "listening"/);
+  assert.match(readerSource, /recordListeningSegment/);
+  assert.match(readerSource, /navigator\.share/);
+});
+
 test("presents local and streamed books in one library with only a stream badge as source chrome", async () => {
   const readerSource = await readFile(resolve(root, "app", "reader", "page.tsx"), "utf8");
   const sourcesSource = await readFile(resolve(root, "lib", "reader", "sources.ts"), "utf8");
@@ -211,7 +223,7 @@ test("remote cache still enforces the 1.5 GiB emergency ceiling", () => {
   assert.equal(cachePolicy.planRoundRobinEviction([], { key: "oversized", size: 2 * gib, sequence: 1 }).cacheable, false);
 });
 
-const privatePackage = resolve(root, "..", "test1-milestone2-output", "Animal_Farm.booksync");
+const privatePackage = resolve(root, "..", "local-data", "books", "in-hugging-face", "Animal_Farm", "generated", "test1-milestone2-output", "Animal_Farm.booksync");
 test("validates every declared file in the available full-book package", { skip: !existsSync(privatePackage) }, async () => {
   const manifest = await validation.validateManifest(JSON.parse(await readFile(resolve(privatePackage, "manifest.json"), "utf8")));
   let checked = 0;

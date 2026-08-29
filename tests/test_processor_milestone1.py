@@ -71,6 +71,51 @@ class MilestoneOneProcessorTests(unittest.TestCase):
         plan = build_processing_plan(book, words, "Synthetic", 200.0, 10.0, "smart")
         self.assertEqual([cut.chapter_number for cut in plan.cuts], ["1", "2"])
 
+    def test_repeated_book_titles_do_not_collapse_distinct_spine_items(self) -> None:
+        chapters = [
+            Chapter("1", "Synthetic Book", 1, "First distinctive chapter opening begins right here."),
+            Chapter("2", "Synthetic Book", 2, "Second distinctive chapter opening begins much later."),
+        ]
+        book = ExtractedBook("epub", [], chapters, "Synthetic Book", None)
+        spoken = [
+            ("Synthetic", 0.0), ("Book", 0.2),
+            ("First", 10.0), ("distinctive", 10.2), ("chapter", 10.4), ("opening", 10.6),
+            ("begins", 10.8), ("right", 11.0), ("here.", 11.2),
+            ("Second", 100.0), ("distinctive", 100.2), ("chapter", 100.4), ("opening", 100.6),
+            ("begins", 100.8), ("much", 101.0), ("later.", 101.2),
+        ]
+        words = [Word(text, start, start + 0.18) for text, start in spoken]
+
+        plan = build_processing_plan(book, words, "Synthetic_Book", 150.0, 10.0, "smart")
+
+        self.assertEqual(len(plan.chapter_ranges), 2)
+        self.assertAlmostEqual(plan.chapter_ranges[0].start, 0.0)
+        self.assertAlmostEqual(plan.chapter_ranges[0].end, 100.0)
+        self.assertAlmostEqual(plan.chapter_ranges[1].start, 100.0)
+
+    def test_front_matter_spoken_as_end_credits_cannot_hide_main_chapters(self) -> None:
+        chapters = [
+            Chapter("1", "Publisher", 1, "Publisher legal credits are spoken at the very end."),
+            Chapter("2", "Opening", 2, "First real chapter starts with this distinctive sentence."),
+            Chapter("3", "Closing", 3, "Second real chapter starts with another distinctive sentence."),
+        ]
+        book = ExtractedBook("epub", [], chapters, "Synthetic Book", None)
+        timed_phrases = [
+            (10.0, "First real chapter starts with this distinctive sentence"),
+            (100.0, "Second real chapter starts with another distinctive sentence"),
+            (140.0, "Publisher legal credits are spoken at the very end"),
+        ]
+        words = [
+            Word(token + ("." if token_index == len(phrase.split()) - 1 else ""), start + token_index * 0.2,
+                 start + token_index * 0.2 + 0.18)
+            for start, phrase in timed_phrases
+            for token_index, token in enumerate(phrase.split())
+        ]
+
+        plan = build_processing_plan(book, words, "Synthetic_Book", 150.0, 10.0, "smart")
+
+        self.assertEqual([item.chapter.title for item in plan.chapter_ranges], ["Opening", "Closing"])
+
     def test_package_builder_emits_a_valid_booksync_package(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

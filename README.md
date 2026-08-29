@@ -1,5 +1,7 @@
 # BookSync
 
+The canonical recoverable batch workflow is documented in [docs/end-to-end-pipeline.md](docs/end-to-end-pipeline.md).
+
 Read a book while its audiobook keeps your place.
 
 BookSync turns a matching **PDF or EPUB + audiobook** into:
@@ -38,6 +40,8 @@ PDF or EPUB + audiobook
 - Browse by full chapters or shorter timed sessions.
 - Change playback speed from `0.5×` to `2.5×`.
 - Mark sentences for later recall with **✦ Highlight**.
+- Export a book's locally saved highlights as a Markdown file through the iOS share sheet or browser download.
+- Review which book, chapter/session range, and how many minutes you listened today; listening history stays in the device database.
 - See current-session progress, whole-book progress, completed chapters, and your current location.
 - Keep imported and streamed books together in one library.
 - Identify streamed books by the small cloud/play badge on the cover. No badge means the book is stored locally.
@@ -56,6 +60,8 @@ Studio can:
 - compare local book IDs with the configured private Hugging Face dataset;
 - distinguish **Local only**, **Local + cloud**, and **Cloud only** books; and
 - validate and upload a selected local package to Hugging Face.
+- run a folder of EPUB/PDF and neighboring audiobook folders through sequential GPU transcription, overlapping CPU packaging, and a separate automatic upload lane;
+- show GPU, CPU, upload, per-book progress, and unified logs in the Spotify-style Pipeline screen.
 
 Download the newest `BookSync-Studio-*-Setup.exe` from [GitHub Releases](https://github.com/i-am-mushfiq/AudioBookSplitter/releases), or build it from source with:
 
@@ -68,6 +74,14 @@ npm run desktop:package
 Studio saves books to `Downloads\BookSync` by default. You can change the library folder at any time. The app remembers the folder and processing preferences, but never saves a token entered in the Studio token field.
 
 The Windows installer includes the BookSync application and processing source, but not the multi-gigabyte Python/CUDA runtime. Create the `booksync` Conda environment once before opening Studio. Existing `animal-farm-splitter` and `pdf-audiobook-splitter` environments are detected for backward compatibility. See [the Windows Studio guide](docs/windows-studio.md) for installation, cloud sync, and troubleshooting.
+
+## Repository workspace layout
+
+Source stays in `processor/`, `frontend/`, `tools/`, `schemas/`, `tests/`, and
+`docs/`. Private local fixtures, generated test exports, and the incoming shelf
+are consolidated under `local-data/books/`, grouped by Hugging Face and local
+processing status. Screenshots and old builds live under `artifacts/` and
+`frontend/artifacts/`.
 
 ## Run from source: process your first book in the web app
 
