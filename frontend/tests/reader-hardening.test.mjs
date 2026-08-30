@@ -67,6 +67,8 @@ test("locks every app surface to the viewport and scrolls only dedicated content
   assert.match(readerSource, /className="library-scroll"/);
   assert.match(readerCss, /\.library-home \{[^}]*overflow: hidden/);
   assert.match(readerCss, /\.library-scroll \{[^}]*overflow-y: auto/);
+  assert.match(readerCss, /@media \(max-width: 760px\)[\s\S]*\.library-home-header \{[^}]*grid-template-columns: minmax\(0, 1fr\)/);
+  assert.match(readerCss, /\.library-actions \{[^}]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
   assert.match(readerCss, /\.surface-reader \.reader-stage \{[^}]*overflow-y: auto/);
   assert.match(mobileCss, /html \{[^}]*position: fixed[^}]*inset: 0/);
   assert.match(mobileCss, /body \{[^}]*position: fixed[^}]*inset: 0/);
